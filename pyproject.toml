@@ -1,0 +1,43 @@
+[tool.poetry]
+name = "paper-agent"
+version = "0.1.0"
+description = "CLI-first paper intelligence system for AI researchers"
+authors = ["linshaoxin-maker <skyward@icloud.com>"]
+readme = "README.md"
+packages = [{include = "paper_agent"}]
+
+[tool.poetry.scripts]
+paper-agent = "paper_agent.cli.app:app"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+typer = ">=0.12"
+rich = ">=13.0"
+pyyaml = ">=6.0"
+httpx = {version = ">=0.27", extras = ["socks"]}
+openai = ">=1.0"
+anthropic = ">=0.30"
+prompt-toolkit = ">=3.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+pytest-asyncio = ">=0.23"
+ruff = ">=0.5"
+mypy = ">=1.10"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
