@@ -4,6 +4,7 @@ argument-hint: <topic>
 allowed-tools: [
   "mcp__plugin_paper-agent_paper-agent__paper_search",
   "mcp__plugin_paper-agent_paper-agent__paper_search_online",
+  "mcp__plugin_paper-agent_paper-agent__paper_survey_collect",
   "mcp__plugin_paper-agent_paper-agent__paper_batch_show",
   "mcp__plugin_paper-agent_paper-agent__paper_compare",
   "mcp__plugin_paper-agent_paper-agent__paper_export",

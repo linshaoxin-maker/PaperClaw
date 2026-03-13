@@ -151,6 +151,37 @@ END;
 """
 
 
+import re
+
+_FTS_SPECIAL = re.compile(r'[:\-\.\(\)\*\^~"\{\}]')
+
+
+def _sanitize_fts_query(query: str) -> str:
+    """Make a user query safe for FTS5 MATCH.
+
+    FTS5 treats hyphens as column-prefix operators (``long-term`` becomes
+    ``long:term``) and other punctuation as syntax.  We quote any token
+    that contains special characters so FTS5 treats it as a literal.
+    """
+    tokens = query.split()
+    safe: list[str] = []
+    for t in tokens:
+        if _FTS_SPECIAL.search(t):
+            # Strip existing quotes, then wrap in double quotes
+            cleaned = t.replace('"', "")
+            if cleaned:
+                safe.append(f'"{cleaned}"')
+        else:
+            safe.append(t)
+    return " ".join(safe) if safe else query
+
+
+def _quote_all_tokens(query: str) -> str:
+    """Last-resort fallback: quote every token individually."""
+    tokens = query.split()
+    return " ".join(f'"{t.replace(chr(34), "")}"' for t in tokens if t.strip())
+
+
 class SQLiteStorage:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
@@ -277,14 +308,27 @@ class SQLiteStorage:
         return [self._row_to_paper(r) for r in rows]
 
     def search_papers(self, query: str, limit: int = 50) -> list[Paper]:
-        rows = self.conn.execute(
-            """SELECT p.* FROM papers_fts fts
-               JOIN papers p ON p.rowid = fts.rowid
-               WHERE papers_fts MATCH ?
-               ORDER BY rank
-               LIMIT ?""",
-            (query, limit),
-        ).fetchall()
+        sanitized = _sanitize_fts_query(query)
+        try:
+            rows = self.conn.execute(
+                """SELECT p.* FROM papers_fts fts
+                   JOIN papers p ON p.rowid = fts.rowid
+                   WHERE papers_fts MATCH ?
+                   ORDER BY rank
+                   LIMIT ?""",
+                (sanitized, limit),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # Fallback: quote every token so FTS5 treats them all as literals
+            fallback = _quote_all_tokens(query)
+            rows = self.conn.execute(
+                """SELECT p.* FROM papers_fts fts
+                   JOIN papers p ON p.rowid = fts.rowid
+                   WHERE papers_fts MATCH ?
+                   ORDER BY rank
+                   LIMIT ?""",
+                (fallback, limit),
+            ).fetchall()
         return [self._row_to_paper(r) for r in rows]
 
     def update_paper_scores(

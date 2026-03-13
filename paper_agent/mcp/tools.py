@@ -45,27 +45,91 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         return found, not_found
 
     @mcp.tool()
-    def paper_search(query: str, limit: int = 20) -> str:
+    def paper_search(query: str, limit: int = 20, diverse: bool = False) -> str:
         """Search the local paper library using full-text search.
 
         Args:
             query: Search query (supports natural language and keywords).
             limit: Maximum number of results to return (default 20).
+            diverse: If True, auto-expand keywords via synonyms and profile
+                     to find more diverse results. Use this when:
+                     - The user wants broader coverage
+                     - Initial search returned too few results
+                     - The query uses abbreviations (e.g. "GNN" → also search
+                       "graph neural network")
 
         Returns:
-            JSON array of matching papers with title, authors, score, and URL.
+            JSON object with papers and suggestions. When results are few,
+            the 'suggestions' field provides actionable follow-ups:
+            - "diverse_search": re-run with diverse=True for keyword expansion
+            - "online_search": try paper_search_online for real-time arXiv results
+            - "collect_first": local library is empty, run paper_collect first
         """
-        result = ctx.search_engine.search(query, limit=limit)
-        if not result.papers:
-            return json.dumps({
-                "status": "empty",
-                "message": "No matching papers found.",
-                "papers": [],
-            })
-        return json.dumps({
-            "status": "completed",
+        result = ctx.search_engine.search(query, limit=limit, diverse=diverse)
+        response: dict[str, Any] = {
+            "status": result.status,
             "count": len(result.papers),
             "papers": [p.to_summary_dict() for p in result.papers],
+        }
+        if result.suggestions:
+            response["suggestions"] = [
+                s.to_dict() if hasattr(s, "to_dict") else s
+                for s in result.suggestions
+            ]
+        if not result.papers:
+            response["message"] = "No matching papers found in local library."
+        return json.dumps(response, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_search_batch(
+        queries: list[str],
+        limit_per_query: int = 20,
+        diverse: bool = False,
+    ) -> str:
+        """Search for multiple topics/directions at once. Returns results grouped by query.
+
+        Use this instead of calling paper_search repeatedly when:
+        - The user wants to survey multiple research directions
+        - The user asks "compare these N topics" or "each direction pick M papers"
+        - You need papers from several keyword groups for a literature survey
+
+        Each query is searched independently; a failure in one query does NOT
+        affect the others.
+
+        Args:
+            queries: List of search queries (one per topic/direction).
+            limit_per_query: Max papers to return per query (default 20).
+            diverse: If True, auto-expand keywords via synonyms for each query.
+
+        Returns:
+            JSON object with results grouped by query, plus aggregate totals.
+        """
+        groups: list[dict[str, Any]] = []
+        total_papers = 0
+        for q in queries:
+            try:
+                result = ctx.search_engine.search(q, limit=limit_per_query, diverse=diverse)
+                papers = [p.to_summary_dict() for p in result.papers]
+                groups.append({
+                    "query": q,
+                    "status": result.status,
+                    "count": len(papers),
+                    "papers": papers,
+                })
+                total_papers += len(papers)
+            except Exception as e:
+                groups.append({
+                    "query": q,
+                    "status": "error",
+                    "count": 0,
+                    "papers": [],
+                    "error": str(e),
+                })
+        return json.dumps({
+            "status": "completed",
+            "total_queries": len(queries),
+            "total_papers": total_papers,
+            "groups": groups,
         }, ensure_ascii=False, default=str)
 
     @mcp.tool()
@@ -86,36 +150,49 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
 
     @mcp.tool()
     def paper_collect(days: int = 7, max_results: int = 200, do_filter: bool = True) -> str:
-        """Collect papers from configured arXiv categories.
+        """Collect papers from all enabled sources (arXiv, DBLP, OpenReview, ACL Anthology).
 
-        This fetches recent papers and optionally scores them with the LLM.
-        Requires prior setup via 'paper-agent init' and 'paper-agent profile create'.
+        Fetches papers concurrently from different API types and optionally
+        scores them with the LLM. Requires prior setup via 'paper-agent init'
+        and 'paper-agent profile create'.
 
         Args:
             days: Number of days to look back (default 7).
-            max_results: Maximum papers per category (default 200).
+            max_results: Maximum papers per source (default 200).
             do_filter: Whether to run LLM relevance scoring (default True).
 
         Returns:
             JSON object with collection statistics.
         """
-        cfg = ctx.config
-        record = ctx.collection_manager.collect_from_arxiv(
-            categories=cfg.sources, days_back=days, max_results=max_results,
-        )
+        enabled_sources = ctx.source_registry.list_enabled_sources()
+        if enabled_sources:
+            record = ctx.collection_manager.collect_from_sources(
+                sources=enabled_sources, profile=ctx.config,
+                days_back=days, max_results=max_results,
+            )
+        else:
+            cfg = ctx.config
+            record = ctx.collection_manager.collect_from_arxiv(
+                categories=cfg.sources, days_back=days, max_results=max_results,
+            )
 
         result: dict[str, Any] = {
             "status": record.status,
             "collected": record.collected_count,
             "new": record.new_count,
             "duplicate": record.duplicate_count,
+            "source": record.source_name,
         }
 
         if record.status == "failed":
             result["error"] = record.error_summary
             return json.dumps(result, ensure_ascii=False, default=str)
 
+        if record.error_summary and record.error_summary.get("partial_errors"):
+            result["partial_errors"] = record.error_summary["partial_errors"]
+
         if do_filter and record.new_count > 0:
+            cfg = ctx.config
             papers = ctx.storage.get_all_papers(limit=record.collected_count)
             unscored = [p for p in papers if p.lifecycle_state == "discovered"]
             if unscored:
@@ -312,23 +389,32 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
     # ── v02 Tools ──────────────────────────────────────────────────────
 
     @mcp.tool()
-    def paper_batch_show(paper_ids: list[str]) -> str:
-        """Get detailed information for multiple papers at once.
+    def paper_batch_show(paper_ids: list[str], detail: bool = False) -> str:
+        """Get information for multiple papers at once.
 
         Use this when comparing papers or preparing a survey — fetch all
         papers in one call instead of calling paper_show repeatedly.
 
+        By default returns compact format (truncated abstract, top-5 authors)
+        to keep output readable. Set detail=True for full paper data.
+
         Args:
             paper_ids: List of paper IDs (internal IDs, canonical keys, or bare arXiv IDs).
+            detail: If True, return full details (long abstracts, all tags).
+                    Default False returns compact format suitable for surveys.
 
         Returns:
-            JSON object with an array of paper details and any IDs not found.
+            JSON object with an array of papers and any IDs not found.
         """
         found, not_found = _resolve_papers(paper_ids)
+        papers_data = (
+            [p.to_detail_dict() for p in found] if detail
+            else [p.to_compact_dict() for p in found]
+        )
         return json.dumps({
             "status": "ok",
             "count": len(found),
-            "papers": [p.to_detail_dict() for p in found],
+            "papers": papers_data,
             "not_found": not_found,
         }, ensure_ascii=False, default=str)
 
@@ -478,14 +564,19 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         paper_ids: list[str],
         output_dir: str = "papers",
     ) -> str:
-        """Download PDF files for papers from arXiv.
+        """Download PDF files for one or more papers from arXiv.
+
+        Supports batch download — pass multiple IDs to download them all
+        at once. Skips papers that are already downloaded.
 
         Args:
-            paper_ids: List of paper IDs (internal IDs, canonical keys, or bare arXiv IDs).
+            paper_ids: List of paper IDs to download. Accepts internal IDs,
+                       canonical keys ('arxiv:2301.12345'), or bare arXiv IDs.
+                       Pass as many IDs as needed for batch download.
             output_dir: Directory to save PDFs (default: 'papers').
 
         Returns:
-            JSON object with download results for each paper.
+            JSON object with per-paper results (downloaded / exists / failed / skipped).
         """
         import httpx as _httpx
 
@@ -557,63 +648,149 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         }, ensure_ascii=False, default=str)
 
     @mcp.tool()
+    def paper_survey_collect(
+        keywords: list[str],
+        venues: list[str] | None = None,
+        years_back: int = 5,
+        max_results: int = 500,
+    ) -> str:
+        """Survey a research topic by collecting papers from the past N years.
+
+        Searches arXiv + DBLP + Semantic Scholar concurrently for broad
+        coverage. Use this when the user wants to understand a research
+        direction, prepare a literature review, or explore a new area.
+
+        Args:
+            keywords: Research keywords, e.g. ["placement", "EDA", "VLSI"].
+            venues: Conference filter, e.g. ["DAC", "ICCAD"]. None = all venues.
+            years_back: How many years to look back (default 5).
+            max_results: Max total papers to return (default 500).
+
+        Returns:
+            JSON object with collection statistics.
+        """
+        record = ctx.collection_manager.survey_topic(
+            keywords=keywords, venues=venues,
+            years_back=years_back, max_results=max_results,
+        )
+
+        result: dict[str, Any] = {
+            "status": record.status,
+            "collected": record.collected_count,
+            "new": record.new_count,
+            "duplicate": record.duplicate_count,
+            "source": "survey",
+        }
+        if record.error_summary:
+            result["errors"] = record.error_summary
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
     def paper_search_online(
         query: str,
         max_results: int = 30,
+        sources: list[str] | None = None,
         save_to_library: bool = True,
     ) -> str:
-        """Search arXiv online for papers matching a query.
+        """Search online for papers matching a query (arXiv + Semantic Scholar).
 
         Unlike paper_search (which searches the local library), this tool
-        queries the arXiv API in real-time and can find papers not yet in
-        the local library.
+        queries external APIs in real-time. By default searches BOTH arXiv
+        and Semantic Scholar to cover preprints AND conference/journal papers.
 
         Args:
             query: Search query (natural language or keywords).
-            max_results: Maximum number of results (default 30, max 100).
+            max_results: Maximum number of results per source (default 30, max 100).
+            sources: Which APIs to search. Default ["arxiv", "s2"] (both).
+                     Use ["arxiv"] for preprints only, ["s2"] for conferences only.
             save_to_library: Whether to save found papers to the local library (default True).
 
         Returns:
-            JSON object with papers found on arXiv.
+            JSON object with papers found online, grouped by source.
         """
-        from paper_agent.infra.sources.arxiv_adapter import (
-            ARXIV_API_URL,
-            ArxivAdapter,
-        )
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
+        if sources is None:
+            sources = ["arxiv", "s2"]
         max_results = min(max_results, 100)
-        adapter = ArxivAdapter()
 
-        search_query = "+AND+".join(
-            f"all:{word}" for word in query.split() if word.strip()
-        )
-        url = (
-            f"{ARXIV_API_URL}?search_query={search_query}"
-            f"&start=0&max_results={max_results}"
-            f"&sortBy=relevance&sortOrder=descending"
-        )
+        all_papers: list = []
+        source_counts: dict[str, int] = {}
+        errors: dict[str, str] = {}
 
-        try:
+        def _search_arxiv() -> list:
+            from paper_agent.infra.sources.arxiv_adapter import (
+                ARXIV_API_URL,
+                ArxivAdapter,
+            )
             import httpx as _httpx
+
+            adapter = ArxivAdapter()
+            search_query = "+AND+".join(
+                f"all:{word}" for word in query.split() if word.strip()
+            )
+            url = (
+                f"{ARXIV_API_URL}?search_query={search_query}"
+                f"&start=0&max_results={max_results}"
+                f"&sortBy=relevance&sortOrder=descending"
+            )
             client = _httpx.Client(timeout=30.0, follow_redirects=True, trust_env=True)
-            resp = client.get(url)
-            client.close()
-            if resp.status_code != 200:
-                return json.dumps({
-                    "error": f"arXiv API returned {resp.status_code}",
-                })
-            papers = adapter._parse_response(resp.text)
-        except Exception as exc:
-            return json.dumps({"error": f"arXiv search failed: {exc}"})
+            try:
+                resp = client.get(url)
+                if resp.status_code != 200:
+                    raise RuntimeError(f"arXiv API returned {resp.status_code}")
+                return adapter._parse_response(resp.text)
+            finally:
+                client.close()
+
+        def _search_s2() -> list:
+            from paper_agent.infra.sources.semantic_scholar_adapter import (
+                SemanticScholarAdapter,
+            )
+            adapter = SemanticScholarAdapter()
+            keywords = [w for w in query.split() if w.strip()]
+            return adapter.discover(
+                keywords=keywords, max_results=max_results,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures: dict = {}
+            if "arxiv" in sources:
+                futures[executor.submit(_search_arxiv)] = "arxiv"
+            if "s2" in sources:
+                futures[executor.submit(_search_s2)] = "s2"
+
+            for future in as_completed(futures):
+                src = futures[future]
+                try:
+                    papers = future.result()
+                    source_counts[src] = len(papers)
+                    all_papers.extend(papers)
+                except Exception as exc:
+                    errors[src] = str(exc)
+                    source_counts[src] = 0
+
+        # Deduplicate by canonical_key
+        seen: set[str] = set()
+        unique: list = []
+        for p in all_papers:
+            key = p.canonical_key or p.id
+            if key not in seen:
+                seen.add(key)
+                unique.append(p)
 
         new_count = 0
-        if save_to_library and papers:
-            new_count, _ = ctx.storage.save_papers(papers)
+        if save_to_library and unique:
+            new_count, _ = ctx.storage.save_papers(unique)
 
-        return json.dumps({
+        result: dict[str, Any] = {
             "status": "ok",
-            "source": "arxiv_online",
-            "count": len(papers),
+            "sources_searched": list(source_counts.keys()),
+            "count": len(unique),
             "new_saved": new_count,
-            "papers": [p.to_summary_dict() for p in papers],
-        }, ensure_ascii=False, default=str)
+            "per_source": source_counts,
+            "papers": [p.to_summary_dict() for p in unique],
+        }
+        if errors:
+            result["errors"] = errors
+        return json.dumps(result, ensure_ascii=False, default=str)

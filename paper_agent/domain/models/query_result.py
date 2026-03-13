@@ -16,6 +16,7 @@ class QueryResult:
     papers: list[Paper] = field(default_factory=list)
     answer: dict[str, Any] | None = None
     clusters: list[dict[str, Any]] | None = None
+    suggestions: list[Any] = field(default_factory=list)
     status: str = "completed"
     created_at: datetime = field(default_factory=datetime.utcnow)
 
@@ -31,4 +32,9 @@ class QueryResult:
             result["answer"] = self.answer
         if self.clusters:
             result["clusters"] = self.clusters
+        if self.suggestions:
+            result["suggestions"] = [
+                s.to_dict() if hasattr(s, "to_dict") else s
+                for s in self.suggestions
+            ]
         return result

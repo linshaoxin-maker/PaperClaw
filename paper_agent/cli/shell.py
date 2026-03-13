@@ -146,7 +146,20 @@ class InteractiveShell:
             else:
                 i += 1
 
-        with console.status("[bold green]Collecting papers from arXiv..."):
+        enabled_sources = ctx.source_registry.list_enabled_sources()
+        if enabled_sources:
+            source_names = [s.display_name for s in enabled_sources]
+            console.print(
+                f"[bold green]Collecting from {len(enabled_sources)} sources: "
+                f"{', '.join(source_names[:5])}"
+                f"{'...' if len(source_names) > 5 else ''}[/bold green]"
+            )
+            record = ctx.collection_manager.collect_from_sources(
+                sources=enabled_sources, profile=cfg,
+                days_back=days, max_results=max_results,
+            )
+        else:
+            console.print("[bold green]Collecting papers from arXiv...[/bold green]")
             record = ctx.collection_manager.collect_from_arxiv(
                 categories=cfg.sources, days_back=days, max_results=max_results
             )
@@ -225,26 +238,40 @@ class InteractiveShell:
             return
 
         limit = 20
+        diverse = False
         query_parts = []
         i = 0
         while i < len(args):
             if args[i] in ("-n", "--limit") and i + 1 < len(args):
                 limit = int(args[i + 1])
                 i += 2
+            elif args[i] in ("-D", "--diverse"):
+                diverse = True
+                i += 1
             else:
                 query_parts.append(args[i])
                 i += 1
 
         query = " ".join(query_parts)
-        result = ctx.search_engine.search(query, limit=limit)
+        result = ctx.search_engine.search(query, limit=limit, diverse=diverse)
         self._last_results = result.papers
 
         if not result.papers:
             console.print("[yellow]未找到匹配论文。[/yellow]")
-            return
+        else:
+            print_paper_table(result.papers, title=f'Search: "{query}"')
+            console.print(f"\n[dim]Tip: [bold]show 1[/bold] to view paper #1 detail[/dim]")
 
-        print_paper_table(result.papers, title=f'Search: "{query}"')
-        console.print(f"\n[dim]Tip: [bold]show 1[/bold] to view paper #1 detail[/dim]")
+        if result.suggestions:
+            console.print()
+            for s in result.suggestions:
+                if s.type == "diverse_search":
+                    console.print(f"[cyan]💡 {s.message}[/cyan]")
+                    console.print(f"   → search {query} --diverse")
+                elif s.type == "online_search":
+                    console.print(f"[cyan]🌐 {s.message}[/cyan]")
+                elif s.type == "collect_first":
+                    console.print(f"[yellow]📥 {s.message}[/yellow]")
 
     def _cmd_show(self, args: list[str]) -> None:
         if not args:

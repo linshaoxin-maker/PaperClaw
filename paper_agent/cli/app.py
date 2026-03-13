@@ -140,13 +140,14 @@ def init(
 @app.command()
 def collect(
     days: int = typer.Option(7, "--days", "-d", help="Collect papers from last N days"),
-    max_results: int = typer.Option(200, "--max", "-m", help="Max papers per category"),
+    max_results: int = typer.Option(200, "--max", "-m", help="Max papers per source"),
     do_filter: bool = typer.Option(True, "--filter/--no-filter", help="Run LLM filtering after collection"),
+    arxiv_only: bool = typer.Option(False, "--arxiv-only", help="Only collect from arXiv (legacy mode)"),
     debug: bool = typer.Option(False, "--debug", help="Show detailed collection logs"),
     as_json: bool = typer.Option(False, "--json", help="Output as JSON"),
     config_path: Optional[str] = typer.Option(None, "--config"),
 ) -> None:
-    """Collect papers from configured arXiv categories."""
+    """Collect papers from all enabled sources (arXiv, DBLP, OpenReview, ACL)."""
     ctx = _get_ctx(config_path, debug=debug)
     try:
         cfg = ctx.require_initialized()
@@ -154,9 +155,29 @@ def collect(
         print_error(str(e))
         raise typer.Exit(1)
 
-    with console.status("[bold green]Collecting papers from arXiv..."):
+    if arxiv_only:
+        console.print("[bold green]Collecting papers from arXiv...[/bold green]")
         record = ctx.collection_manager.collect_from_arxiv(
             categories=cfg.sources, days_back=days, max_results=max_results
+        )
+    else:
+        enabled_sources = ctx.source_registry.list_enabled_sources()
+        if not enabled_sources and not cfg.sources:
+            print_error(
+                "未配置任何数据源。请先执行 paper-agent profile create "
+                "或 paper-agent sources enable <source_id>"
+            )
+            raise typer.Exit(1)
+
+        source_names = [s.display_name for s in enabled_sources]
+        console.print(
+            f"[bold green]Collecting from {len(enabled_sources)} sources: "
+            f"{', '.join(source_names[:5])}"
+            f"{'...' if len(source_names) > 5 else ''}[/bold green]"
+        )
+        record = ctx.collection_manager.collect_from_sources(
+            sources=enabled_sources, profile=cfg,
+            days_back=days, max_results=max_results,
         )
 
     if as_json:
@@ -172,6 +193,10 @@ def collect(
         f"({record.new_count} 新增, {record.duplicate_count} 重复)"
     )
 
+    if record.error_summary and record.error_summary.get("partial_errors"):
+        partial = record.error_summary["partial_errors"]
+        console.print(f"[yellow]部分源抓取失败 ({len(partial)}): {list(partial.keys())}[/yellow]")
+
     if record.collected_count == 0:
         console.print(
             "[yellow]提示: 未获取到任何论文。可使用 [bold]paper-agent collect --debug[/bold] 查看完整抓取日志。[/yellow]"
@@ -185,6 +210,60 @@ def collect(
             interests = {"topics": cfg.topics, "keywords": cfg.keywords}
             ctx.filtering_manager.filter_papers(unscored, interests)
             print_success(f"过滤完成: {len(unscored)} 篇论文已评分。")
+
+
+# ── survey ──
+
+@app.command()
+def survey(
+    keywords: str = typer.Argument(..., help="Research keywords (comma-separated)"),
+    years: int = typer.Option(5, "--years", "-y", help="How many years to look back"),
+    venues: Optional[str] = typer.Option(None, "--venues", "-v", help="Conference filter (comma-separated, e.g. DAC,ICCAD)"),
+    max_results: int = typer.Option(500, "--max", "-m", help="Max total papers"),
+    debug: bool = typer.Option(False, "--debug", help="Show detailed logs"),
+    as_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+    config_path: Optional[str] = typer.Option(None, "--config"),
+) -> None:
+    """Survey a research topic: collect papers from arXiv + DBLP + Semantic Scholar over N years."""
+    ctx = _get_ctx(config_path, debug=debug)
+    try:
+        ctx.require_initialized()
+    except Exception as e:
+        print_error(str(e))
+        raise typer.Exit(1)
+
+    kw_list = [k.strip() for k in keywords.split(",") if k.strip()]
+    venue_list = [v.strip() for v in venues.split(",") if v.strip()] if venues else None
+
+    console.print(
+        f"[bold green]Surveying: {', '.join(kw_list)} "
+        f"(past {years} years, venues={venue_list or 'all'})[/bold green]"
+    )
+    record = ctx.collection_manager.survey_topic(
+        keywords=kw_list, venues=venue_list,
+        years_back=years, max_results=max_results,
+    )
+
+    if as_json:
+        print_json_output(record.to_dict())
+        return
+
+    if record.status == "failed":
+        print_error(f"调研失败: {record.error_summary}")
+        raise typer.Exit(1)
+
+    print_success(
+        f"调研完成: {record.collected_count} 篇论文 "
+        f"({record.new_count} 新增, {record.duplicate_count} 重复)"
+    )
+
+    if record.error_summary and record.error_summary.get("partial_errors"):
+        partial = record.error_summary["partial_errors"]
+        console.print(f"[yellow]部分源失败 ({len(partial)}): {list(partial.keys())}[/yellow]")
+
+    console.print(
+        f"\n[dim]提示: 使用 [bold]paper-agent search \"{kw_list[0]}\"[/bold] 搜索已入库论文。[/dim]"
+    )
 
 
 # ── digest ──
@@ -242,10 +321,18 @@ def digest(
 def search(
     query: str = typer.Argument(..., help="Search query"),
     limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+    diverse: bool = typer.Option(
+        False, "--diverse", "-D",
+        help="Auto-expand keywords (synonyms + profile) for broader results",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Output as JSON"),
     config_path: Optional[str] = typer.Option(None, "--config"),
 ) -> None:
-    """Search the local paper library."""
+    """Search the local paper library.
+
+    Use --diverse / -D to auto-expand keywords via synonyms and your
+    research profile for broader coverage.
+    """
     ctx = _get_ctx(config_path)
     try:
         ctx.require_initialized()
@@ -257,7 +344,7 @@ def search(
         print_error("当前本地论文库为空。请先执行 paper-agent collect。")
         raise typer.Exit(1)
 
-    result = ctx.search_engine.search(query, limit=limit)
+    result = ctx.search_engine.search(query, limit=limit, diverse=diverse)
 
     if as_json:
         print_json_output(result.to_dict())
@@ -265,9 +352,27 @@ def search(
 
     if not result.papers:
         console.print("[yellow]未找到匹配论文。[/yellow]")
-        return
+    else:
+        print_paper_table(result.papers, title=f'Search: "{query}"')
 
-    print_paper_table(result.papers, title=f'Search: "{query}"')
+    if result.suggestions:
+        console.print()
+        for s in result.suggestions:
+            if s.type == "diverse_search":
+                console.print(
+                    f"[cyan]💡 {s.message}[/cyan]\n"
+                    f"   → paper-agent search \"{query}\" --diverse"
+                )
+            elif s.type == "online_search":
+                console.print(
+                    f"[cyan]🌐 {s.message}[/cyan]\n"
+                    f"   → 通过 MCP 工具 paper_search_online(\"{query}\") 在线搜索"
+                )
+            elif s.type == "collect_first":
+                console.print(
+                    f"[yellow]📥 {s.message}[/yellow]\n"
+                    f"   → paper-agent collect"
+                )
 
 
 # ── show ──

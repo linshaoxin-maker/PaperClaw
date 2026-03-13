@@ -40,6 +40,22 @@ class Paper:
             "topics": self.topics,
         }
 
+    def to_compact_dict(self) -> dict[str, Any]:
+        """Mid-level detail: enough for survey/compare, without raw noise."""
+        abstract_short = self.abstract[:300] + "..." if len(self.abstract) > 300 else self.abstract
+        authors_short = self.authors[:5] + (["et al."] if len(self.authors) > 5 else [])
+        return {
+            "id": self.id,
+            "title": self.title,
+            "authors": authors_short,
+            "abstract": abstract_short,
+            "source": self.source_name,
+            "published_at": self.published_at.isoformat() if self.published_at else None,
+            "url": self.url,
+            "topics": self.topics,
+            "score": self.relevance_score,
+        }
+
     def to_detail_dict(self) -> dict[str, Any]:
         return {
             "object_type": "paper_detail",

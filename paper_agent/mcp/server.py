@@ -30,8 +30,10 @@ Tools (v01 — single-paper):
   paper_templates_list  List research area templates
 
 Tools (v02 — multi-paper intelligence):
+  paper_search_batch    Search multiple topics at once (for surveys / comparisons)
   paper_batch_show      Get details for multiple papers at once
   paper_compare         Structured comparison data for multiple papers
+  paper_survey_collect  Collect papers over N years for literature surveys
   paper_export          Export papers to BibTeX / markdown / JSON
   paper_download        Download PDF files from arXiv
   paper_search_online   Search arXiv API in real-time (not just local library)
@@ -46,12 +48,23 @@ Resources:
 
 def create_server(config_path: str | None = None) -> FastMCP:
     """Build and return a configured FastMCP server instance."""
+    import logging
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [paper-agent] %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
+    logger = logging.getLogger("paper-agent")
+
     mcp = FastMCP(
         "paper-agent",
         instructions=_DESCRIPTION,
     )
 
-    ctx = AppContext(config_path)
+    # MCP uses stdio for JSON-RPC; logs go to stderr
+    ctx = AppContext(config_path, stderr_log=lambda msg: logger.info(msg))
     register_tools(mcp, ctx)
     register_resources(mcp, ctx)
 

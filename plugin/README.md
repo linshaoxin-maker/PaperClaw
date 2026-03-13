@@ -27,16 +27,65 @@ plugin/
     │   └── plugin.json              ← 插件清单
     ├── .mcp.json                    ← MCP 服务器配置模板
     ├── commands/                    ← Slash 命令定义
-    │   ├── start-my-day.md
-    │   ├── paper-search.md
-    │   ├── paper-analyze.md
-    │   └── paper-collect.md
+    │   ├── start-my-day.md          ← /start-my-day  每日推荐
+    │   ├── paper-search.md          ← /paper-search   搜索论文（支持关键词扩展）
+    │   ├── paper-collect.md         ← /paper-collect   多源并行采集（arXiv + DBLP + S2）
+    │   ├── paper-analyze.md         ← /paper-analyze   单篇深度分析
+    │   ├── paper-compare.md         ← /paper-compare   多篇对比
+    │   ├── paper-survey.md          ← /paper-survey    文献综述（支持多方向）
+    │   ├── paper-download.md        ← /paper-download  批量下载 PDF
+    │   └── paper-setup.md           ← /paper-setup     初始化配置
     └── skills/
         └── paper-intelligence/
             ├── SKILL.md
             └── references/
                 └── analysis-template.md
 ```
+
+## 命令速查
+
+| 命令 | 功能 | 示例 |
+|------|------|------|
+| `/start-my-day` | 每日论文推荐 | `/start-my-day` |
+| `/paper-search` | 搜索论文（本地 + 在线，支持关键词扩展） | `/paper-search GNN placement` |
+| `/paper-collect` | 从 arXiv + DBLP + Semantic Scholar 并行采集 | `/paper-collect` |
+| `/paper-analyze` | 单篇论文深度分析 | `/paper-analyze 2301.12345` |
+| `/paper-compare` | 多篇论文对比表格 | `/paper-compare 2301.12345,2302.54321` |
+| `/paper-survey` | 生成文献综述（支持多方向批量搜索） | `/paper-survey GNN for EDA` |
+| `/paper-download` | 批量下载 PDF 文件 | `/paper-download 2301.12345,2302.54321` |
+| `/paper-setup` | 初始化研究方向 | `/paper-setup` |
+
+## MCP 工具一览
+
+### 搜索与发现
+
+| 工具 | 说明 |
+|------|------|
+| `paper_search(query, diverse)` | 本地 FTS5 搜索，`diverse=True` 自动扩展关键词（GNN → graph neural network） |
+| `paper_search_batch(queries)` | 多方向批量搜索，一次调用搜 N 个方向，结果分组返回 |
+| `paper_search_online(query, sources)` | 在线搜索 arXiv + Semantic Scholar（覆盖会议论文），`sources=["s2"]` 只搜会议 |
+
+### 采集与管理
+
+| 工具 | 说明 |
+|------|------|
+| `paper_collect(days)` | arXiv + DBLP + Semantic Scholar 三源并行采集，带实时进度日志 |
+| `paper_survey_collect(keywords, venues)` | 回溯 N 年论文采集，用于文献综述 |
+
+### 分析与对比
+
+| 工具 | 说明 |
+|------|------|
+| `paper_show(paper_id)` | 单篇详情 |
+| `paper_batch_show(paper_ids, detail)` | 批量查看（默认 compact 精简输出，`detail=True` 全量） |
+| `paper_compare(paper_ids, aspects)` | 结构化对比数据 |
+
+### 导出与下载
+
+| 工具 | 说明 |
+|------|------|
+| `paper_download(paper_ids)` | 批量下载 PDF（一次传多个 ID） |
+| `paper_export(paper_ids, format)` | 导出 BibTeX / Markdown / JSON |
 
 ## 这个目录 vs `paper-agent setup`
 

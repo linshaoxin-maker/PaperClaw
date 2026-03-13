@@ -2,91 +2,109 @@
 
 ## 文档结构
 
-本项目采用 **AI 辅助开发 6 阶段方法论**，文档按以下结构组织：
+本项目采用 **AI 辅助开发 6 阶段方法论**，文档按以下标准结构组织：
 
 ```
 docs/
-├── idea-brief.md                    # Phase 0: 想法澄清 + 现有文档映射 + 差距分析
-├── glossary.md                      # Phase 0: 领域术语表
-├── paper-agent-overview.md          # 产品总览：全链路工作流 + 交互设计 + 路线图
-├── traceability-matrix.md           # 全程追溯矩阵（Phase 1 种子 → Phase 5 终版）
+├── README.md                                ← 你在这里
+├── glossary.md                              ← 全局：领域术语表
+├── paper-agent-overview.md                  ← 全局：产品总览 (工作流 + 路线图)
 │
-├── v01/                             # v01 版本文档（方法论引入前已有）
-│   ├── requirement.md               # Phase 1: 需求定义 (FR/UC/NFR/假设)
-│   ├── spec.md                      # Phase 2: 功能规格
-│   ├── design.md                    # Phase 3: 技术设计 (C4/Schema/组件)
-│   ├── feature.md                   # Phase 4: 特性视图
-│   ├── mvp.md                       # Phase 5: MVP 范围
-│   ├── user-journey.md              # Phase 0/1: 用户旅程 + 错误恢复
-│   └── developer-journey.md         # Phase 3: 开发者旅程
+├── project-knowledge/                       ← 全局：知识沉淀
+│   ├── decisions/                           ← 重要决策归档
+│   ├── features/                            ← Feature 经验沉淀
+│   ├── incidents/                           ← 事故记录
+│   ├── patterns/                            ← 可复用模式库
+│   └── anti-patterns/                       ← 反模式记录
 │
-├── v01_source/                      # v01 扩展版本：多源收集 + Profile
-│   ├── requirement.md
-│   ├── spec.md
-│   ├── design.md
-│   ├── feature.md
-│   └── mvp.md
+├── architecture/                            ← 全局：架构决策
+│   └── adr/
+│       ├── ADR-001-mcp-as-ide-integration.md
+│       ├── ADR-002-sqlite-local-first.md
+│       └── ADR-003-interaction-layer-division.md
 │
-├── architecture/                    # Phase 3: 架构制品
-│   ├── adr/                         # 架构决策记录
-│   │   ├── ADR-001-mcp-as-ide-integration.md
-│   │   ├── ADR-002-sqlite-local-first.md
-│   │   └── ADR-003-interaction-layer-division.md
-│   ├── c4/                          # C4 图 (现存于 v01/design.md)
-│   ├── views/                       # 4+1 视图
-│   ├── contracts/                   # API/函数契约
-│   └── observability/               # 可观测性设计
-│
-├── features/                        # Phase 4: 特性规格 (按 FEAT-ID 组织)
-│
-├── mvp/                             # Phase 5: MVP Scope
-│
-├── journeys/                        # 用户/开发者/错误恢复旅程
-│
-├── requirements/                    # Phase 1-2 制品
-│   ├── use-cases/
-│   ├── bdd/                         # BDD 场景 (.feature)
-│   └── decision-tables/
-│
-├── spec/                            # Phase 2: Functional Spec
-│
-└── project-knowledge/               # 项目知识沉淀
-    ├── decisions/                   # 重要决策归档
-    ├── features/                    # 每个 Feature 的经验沉淀
-    ├── incidents/                   # 事故记录
-    ├── patterns/                    # 可复用模式库
-    └── anti-patterns/               # 反模式记录
+└── v01/                                     ← 版本级文档 (v01 + v01_source 合并)
+    ├── README.md                            ← 版本概览
+    ├── README-source.md                     ← 多源扩展概览 (原 v01_source)
+    ├── idea-brief.md                        ← Phase 0: 想法澄清 + 差距分析
+    ├── traceability-matrix.md               ← 追溯矩阵
+    │
+    ├── journeys/                            ← 用户/开发者旅程
+    │   ├── user-journey.md                  ← 用户旅程 + 错误恢复
+    │   ├── developer-journey.md             ← 开发者旅程
+    │   └── error-recovery.md                ← 错误恢复 (待拆分)
+    │
+    ├── requirements/                        ← Phase 1: 需求定义
+    │   ├── requirement-doc.md               ← 基础需求 (FR/UC/NFR/假设)
+    │   ├── requirement-doc-source.md        ← 多源扩展需求 (原 v01_source)
+    │   ├── story-map.md                     ← 用户故事地图 (待补充)
+    │   ├── nfr.md                           ← NFR 规格 (待拆分)
+    │   ├── assumptions.md                   ← 假设登记表 (待拆分)
+    │   ├── use-cases/                       ← 用例规约
+    │   ├── bdd/                             ← BDD 场景 (.feature)
+    │   └── decision-tables/                 ← 决策表
+    │
+    ├── spec/                                ← Phase 2: 功能规格
+    │   ├── functional-spec.md               ← 基础功能规格
+    │   └── functional-spec-source.md        ← 多源扩展规格 (原 v01_source)
+    │
+    ├── architecture/                        ← Phase 3: 技术设计
+    │   ├── design-doc.md                    ← 基础技术设计
+    │   ├── design-doc-source.md             ← 多源扩展设计 (原 v01_source)
+    │   ├── impact-analysis.md               ← 变更影响分析 (待补充)
+    │   ├── c4/                              ← C4 图 (现存于 design-doc.md)
+    │   ├── views/                           ← 4+1 视图
+    │   ├── contracts/                       ← API/函数契约
+    │   └── observability/                   ← 可观测性设计
+    │
+    ├── features/                            ← Phase 4: 特性拆解
+    │   ├── feature-list.md                  ← 基础特性清单
+    │   └── feature-list-source.md           ← 多源扩展特性 (原 v01_source)
+    │
+    └── mvp/                                 ← Phase 5: MVP 交付
+        ├── mvp-scope.md                     ← 基础 MVP 范围
+        └── mvp-scope-source.md              ← 多源扩展 MVP (原 v01_source)
 ```
 
 ## 阅读指南
 
 ### 了解产品
-1. `idea-brief.md` — 项目全貌、愿景、范围
-2. `paper-agent-overview.md` — 产品定位 + 10 环节交互设计 + 路线图
+1. `paper-agent-overview.md` — 产品定位 + 10 环节交互设计 + 路线图
+2. `v01/idea-brief.md` — 项目全貌、愿景、范围、差距分析
 
 ### 了解需求与设计
-3. `v01/requirement.md` — 需求定义
-4. `v01/spec.md` — 功能规格
-5. `v01/design.md` — 技术设计
-6. `architecture/adr/` — 关键架构决策
+3. `v01/requirements/requirement-doc.md` — 基础需求定义
+4. `v01/requirements/requirement-doc-source.md` — 多源扩展需求
+5. `v01/spec/functional-spec.md` — 功能规格
+6. `v01/architecture/design-doc.md` — 技术设计
+7. `architecture/adr/` — 关键架构决策
+
+### 了解旅程
+8. `v01/journeys/user-journey.md` — 用户旅程 + 错误恢复
+9. `v01/journeys/developer-journey.md` — 开发者旅程
 
 ### 了解实现与验证
-7. `v01/feature.md` — 特性视图
-8. `v01/mvp.md` — MVP 范围
-9. `traceability-matrix.md` — 需求追溯
+10. `v01/features/feature-list.md` — 特性视图
+11. `v01/mvp/mvp-scope.md` — MVP 范围
+12. `v01/traceability-matrix.md` — 需求追溯
 
-### 版本演进
-- `v01/` → 基础版本
-- `v01_source/` → 多源扩展
-- `paper-agent-overview.md` §4, §7 → v02 规划
+### 知识沉淀
+- `project-knowledge/` — 决策、事故、模式、反模式归档
+- `glossary.md` — 领域术语表
 
 ## 方法论阶段映射
 
 | 阶段 | 主要文档 | 状态 |
 |------|---------|------|
-| Phase 0 想法澄清 | `idea-brief.md`, `glossary.md`, `v01/user-journey.md` | ✅ 完成 |
-| Phase 1 需求定义 | `v01/requirement.md`, `traceability-matrix.md` | ✅ 完成 |
-| Phase 2 功能规格 | `v01/spec.md` | ✅ 完成 (BDD 待补) |
-| Phase 3 技术设计 | `v01/design.md`, `architecture/adr/` | ✅ 完成 (契约待补) |
-| Phase 4 特性拆解 | `v01/feature.md` | ⚠️ 格式待对齐 |
-| Phase 5 MVP 交付 | `v01/mvp.md`, `paper_agent/` 代码 | ✅ 已实现 |
+| Phase 0 想法澄清 | `v01/idea-brief.md`, `glossary.md`, `v01/journeys/user-journey.md` | ✅ 完成 |
+| Phase 1 需求定义 | `v01/requirements/requirement-doc.md`, `v01/traceability-matrix.md` | ✅ 完成 |
+| Phase 2 功能规格 | `v01/spec/functional-spec.md` | ✅ 完成 (BDD 待补) |
+| Phase 3 技术设计 | `v01/architecture/design-doc.md`, `architecture/adr/` | ✅ 完成 (契约待补) |
+| Phase 4 特性拆解 | `v01/features/feature-list.md` | ⚠️ 格式待对齐 |
+| Phase 5 MVP 交付 | `v01/mvp/mvp-scope.md`, `paper_agent/` 代码 | ✅ 已实现 |
+
+## 版本说明
+
+- **v01/** — 基础版本 + 多源扩展（原 `v01_source` 已合并）
+  - 基础文件：`requirement-doc.md`, `functional-spec.md`, `design-doc.md` 等
+  - 多源扩展：带 `-source` 后缀的文件（`requirement-doc-source.md` 等）
