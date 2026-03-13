@@ -18,20 +18,24 @@ DEFAULT_CONFIG_PATH = DEFAULT_DATA_DIR / "config.yaml"
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "library.db"
 DEFAULT_ARTIFACTS_DIR = DEFAULT_DATA_DIR / "artifacts"
 
-_REQUIRED_FIELDS = ["topics", "sources", "llm_provider"]
-
 
 @dataclass
 class ConfigProfile:
+    # Profile (interests) — can be empty until `paper-agent profile create`
     topics: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)
-    sources: list[str] = field(default_factory=lambda: ["cs.AI", "cs.LG"])
+    sources: list[str] = field(default_factory=list)
+    profile_completed: bool = False
+
+    # LLM / infrastructure
     llm_provider: str = "anthropic"
     llm_api_key: str = ""
     llm_model: str = ""
     llm_base_url: str = ""
+
     digest_top_n: int = 20
     relevance_threshold: float = 5.0
+
     data_dir: str = str(DEFAULT_DATA_DIR)
     db_path: str = str(DEFAULT_DB_PATH)
     artifacts_dir: str = str(DEFAULT_ARTIFACTS_DIR)
@@ -49,6 +53,7 @@ class ConfigProfile:
             "topics": self.topics,
             "keywords": self.keywords,
             "sources": self.sources,
+            "profile_completed": self.profile_completed,
             "llm_provider": self.llm_provider,
             "llm_api_key": api_key_display,
             "llm_model": self.llm_model,
@@ -89,14 +94,26 @@ class ConfigManager:
         with open(self._config_path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
-    def validate_config(self, config: ConfigProfile) -> list[str]:
+    def validate_config(self, config: ConfigProfile, *, require_profile: bool = True) -> list[str]:
+        """Validate configuration.
+
+        - Init stage: require_profile=False (LLM-only infra config)
+        - Normal workflows: require_profile=True (requires interests + sources)
+        """
+
         errors: list[str] = []
-        if not config.topics:
-            errors.append("缺少 topics（研究方向）")
-        if not config.sources:
-            errors.append("缺少 sources（论文来源）")
+
         if not config.llm_provider:
             errors.append("缺少 llm_provider（LLM 提供商）")
+        if not config.llm_api_key:
+            errors.append("缺少 llm_api_key（LLM API Key）")
+
+        if require_profile:
+            if not config.topics:
+                errors.append("缺少 topics（研究方向）")
+            if not config.sources:
+                errors.append("缺少 sources（论文来源）")
+
         return errors
 
     def ensure_dirs(self, config: ConfigProfile) -> None:
@@ -106,10 +123,18 @@ class ConfigManager:
     def _dict_to_profile(self, raw: dict[str, Any]) -> ConfigProfile:
         import os
 
+        topics = raw.get("topics", [])
+        keywords = raw.get("keywords", [])
+        sources = raw.get("sources", [])
+
+        inferred_profile_completed = bool(topics and sources)
+        profile_completed = raw.get("profile_completed", inferred_profile_completed)
+
         profile = ConfigProfile(
-            topics=raw.get("topics", []),
-            keywords=raw.get("keywords", []),
-            sources=raw.get("sources", ["cs.AI", "cs.LG"]),
+            topics=topics,
+            keywords=keywords,
+            sources=sources,
+            profile_completed=profile_completed,
             llm_provider=raw.get("llm_provider", "anthropic"),
             llm_api_key=os.environ.get("PAPER_AGENT_LLM_API_KEY", raw.get("llm_api_key", "")),
             llm_model=raw.get("llm_model", ""),

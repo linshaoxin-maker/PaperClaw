@@ -9,6 +9,7 @@ from paper_agent.app.config_manager import ConfigManager, ConfigProfile
 from paper_agent.cli.console import console
 from paper_agent.domain.exceptions import NotInitializedError
 from paper_agent.infra.llm.llm_provider import LLMProvider
+from paper_agent.infra.sources.source_registry import SourceRegistry
 from paper_agent.infra.storage.sqlite_storage import SQLiteStorage
 from paper_agent.services.collection_manager import CollectionManager
 from paper_agent.services.digest_generator import DigestGenerator
@@ -43,6 +44,12 @@ class AppContext:
         storage = SQLiteStorage(cfg.db_path)
         storage.initialize()
         return storage
+
+    @cached_property
+    def source_registry(self) -> SourceRegistry:
+        cfg = self.config
+        user_sources_path = Path(cfg.data_dir) / "sources.yaml"
+        return SourceRegistry(user_sources_path=user_sources_path)
 
     @cached_property
     def llm(self) -> LLMProvider:

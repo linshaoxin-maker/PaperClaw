@@ -1,0 +1,12 @@
+{
+  "name": "paper-agent",
+  "version": "0.1.0",
+  "description": "AI research paper intelligence — collect, filter, recommend, search, and analyze arXiv papers via MCP",
+  "author": {
+    "name": "linshaoxin-maker",
+    "email": "skyward@icloud.com"
+  },
+  "repository": "https://github.com/linshaoxin-maker/paper_agent",
+  "license": "MIT",
+  "keywords": ["arxiv", "paper", "research", "ai", "mcp", "digest", "recommendation"]
+}

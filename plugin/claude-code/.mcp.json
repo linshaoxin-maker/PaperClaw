@@ -1,0 +1,6 @@
+{
+  "paper-agent": {
+    "command": "paper-agent-mcp",
+    "args": []
+  }
+}

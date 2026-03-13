@@ -20,6 +20,10 @@ from paper_agent.cli.console import (
     print_success,
 )
 
+from paper_agent.cli.commands.profile import profile_app
+from paper_agent.cli.commands.setup import setup_app
+from paper_agent.cli.commands.sources import sources_app
+
 app = typer.Typer(
     name="paper-agent",
     help="CLI-first paper intelligence system for AI researchers.",
@@ -27,6 +31,10 @@ app = typer.Typer(
     invoke_without_command=True,
     rich_markup_mode="rich",
 )
+
+app.add_typer(profile_app, name="profile")
+app.add_typer(setup_app, name="setup")
+app.add_typer(sources_app, name="sources")
 
 
 @app.callback(invoke_without_command=True)
@@ -56,11 +64,8 @@ def init(
     api_key: Optional[str] = typer.Option(None, "--api-key", help="LLM API key"),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Custom API base URL"),
     model: Optional[str] = typer.Option(None, "--model", help="LLM model name"),
-    topics: Optional[str] = typer.Option(None, "--topics", help="Research topics (comma-separated)"),
-    keywords: Optional[str] = typer.Option(None, "--keywords", help="Keywords (comma-separated)"),
-    sources: Optional[str] = typer.Option(None, "--sources", help="arXiv categories (comma-separated)"),
 ) -> None:
-    """Initialize Paper Agent with research interests and preferences."""
+    """Initialize Paper Agent (LLM-only infrastructure setup)."""
     from paper_agent.app.config_manager import ConfigManager, ConfigProfile
 
     cm = ConfigManager(config_path)
@@ -70,19 +75,11 @@ def init(
         if not Confirm.ask("[yellow]配置已存在，是否覆盖？[/yellow]"):
             raise typer.Abort()
 
-    console.print("[bold]Paper Agent 初始化[/bold]\n")
+    console.print("[bold]Paper Agent 初始化（基础设施）[/bold]\n")
 
-    topics_default = ", ".join(existing_config.topics) if existing_config and existing_config.topics else "retrieval-augmented generation"
-    keywords_default = ", ".join(existing_config.keywords) if existing_config else ""
-    sources_default = ", ".join(existing_config.sources) if existing_config and existing_config.sources else "cs.AI, cs.LG, cs.CL"
     provider_default = existing_config.llm_provider if existing_config else "anthropic"
     base_url_default = existing_config.llm_base_url if existing_config else ""
     model_default = existing_config.llm_model if existing_config else ""
-
-    # Use prompt_toolkit for better editing experience
-    topics_raw = topics if topics is not None else prompt("研究方向 (逗号分隔): ", default=topics_default)
-    keywords_raw = keywords if keywords is not None else prompt("关键词 (逗号分隔): ", default=keywords_default)
-    sources_raw = sources if sources is not None else prompt("arXiv 分类 (逗号分隔): ", default=sources_default)
 
     # Provider with completion
     provider_completer = WordCompleter(["anthropic", "openai"], ignore_case=True)
@@ -96,28 +93,33 @@ def init(
     if api_key is not None:
         api_key_val = api_key
     elif existing_config and existing_config.llm_api_key:
-        # Show masked current key
-        masked_key = f"{existing_config.llm_api_key[:8]}...{existing_config.llm_api_key[-4:]}" if len(existing_config.llm_api_key) > 12 else f"{existing_config.llm_api_key[:4]}..."
+        masked_key = (
+            f"{existing_config.llm_api_key[:8]}...{existing_config.llm_api_key[-4:]}"
+            if len(existing_config.llm_api_key) > 12
+            else f"{existing_config.llm_api_key[:4]}..."
+        )
         console.print(f"当前 API Key: [dim]{masked_key}[/dim]")
         api_key_input = prompt("API Key (留空保持现有配置): ", default="")
         api_key_val = api_key_input or existing_config.llm_api_key
     else:
         api_key_val = prompt("API Key: ")
 
-    base_url_val = base_url if base_url is not None else prompt("Base URL (留空使用默认): ", default=base_url_default)
-    model_val = model if model is not None else prompt("Model (留空使用默认): ", default=model_default)
+    base_url_val = base_url if base_url is not None else prompt(
+        "Base URL (留空使用默认): ", default=base_url_default
+    )
+    model_val = model if model is not None else prompt(
+        "Model (留空使用默认): ", default=model_default
+    )
 
     config = ConfigProfile(
-        topics=[t.strip() for t in topics_raw.split(",") if t.strip()],
-        keywords=[k.strip() for k in keywords_raw.split(",") if k.strip()],
-        sources=[s.strip() for s in sources_raw.split(",") if s.strip()],
         llm_provider=provider_val,
         llm_api_key=api_key_val,
         llm_model=model_val,
         llm_base_url=base_url_val,
+        profile_completed=False,
     )
 
-    errors = cm.validate_config(config)
+    errors = cm.validate_config(config, require_profile=False)
     if errors:
         for e in errors:
             print_error(e)
@@ -130,7 +132,7 @@ def init(
     ctx.storage.initialize()
 
     print_success(f"\n初始化完成！配置已保存到 {cm.config_path}")
-    console.print("运行 [bold]paper-agent collect[/bold] 开始收集论文。")
+    console.print("下一步：运行 [bold]paper-agent profile create[/bold] 生成研究兴趣与推荐 sources。")
 
 
 # ── collect ──
@@ -381,6 +383,19 @@ def show_config(
 
     if not show_secrets:
         console.print("\n[dim]提示: 使用 --show-secrets 显示完整 API key[/dim]")
+
+
+# ── mcp-server ──
+
+@app.command(name="mcp-server")
+def mcp_server(
+    config_path: Optional[str] = typer.Option(None, "--config", help="Custom config path"),
+) -> None:
+    """Start the MCP server (stdio transport) for Cursor / Claude Code integration."""
+    from paper_agent.mcp.server import create_server
+
+    server = create_server(config_path)
+    server.run()
 
 
 if __name__ == "__main__":

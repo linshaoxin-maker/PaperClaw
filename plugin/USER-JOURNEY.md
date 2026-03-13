@@ -1,0 +1,927 @@
+# Paper Agent in Claude Code — 完整使用指南
+
+在 Claude Code 中使用 paper-agent 的详细旅程。从安装配置到 8 个 slash 命令的完整交互示例。
+
+---
+
+## 前置条件
+
+在 Claude Code 中使用 paper-agent 之前，需要在终端完成两步准备（约 3 分钟）：
+
+```bash
+# 1. 安装 paper-agent
+pipx install paper-agent
+
+# 2. 初始化 LLM（因为要输入 API Key，必须在终端）
+paper-agent init
+#   LLM Provider: openai
+#   API Key: sk-xxxxx
+#   Base URL: (留空)
+#   ✅ 初始化完成！
+```
+
+之后所有操作都可以在 Claude Code 中完成，不需要再回终端。
+
+---
+
+## 连接到 Claude Code
+
+在你的研究项目目录中运行：
+
+```bash
+cd ~/my-research-project
+paper-agent setup claude-code
+```
+
+会生成以下文件：
+
+```
+my-research-project/
+├── .mcp.json                      ← MCP 服务器配置
+├── CLAUDE.md                      ← 告诉 AI 可用的工具
+└── .claude/
+    └── commands/
+        ├── start-my-day.md        ← /start-my-day
+        ├── paper-search.md        ← /paper-search
+        ├── paper-analyze.md       ← /paper-analyze
+        ├── paper-collect.md       ← /paper-collect
+        ├── paper-setup.md         ← /paper-setup
+        ├── paper-compare.md       ← /paper-compare
+        ├── paper-survey.md        ← /paper-survey
+        └── paper-download.md      ← /paper-download
+```
+
+现在启动 Claude Code：
+
+```bash
+claude
+```
+
+Claude Code 读取 `.mcp.json`，自动启动 `paper-agent-mcp` 后端。你就可以开始用了。
+
+---
+
+## 第一次使用：配置研究方向
+
+### `/paper-setup` — 对话式配置
+
+```
+You: /paper-setup
+
+Claude: 你好！我来帮你配置 paper-agent 的研究方向。
+        先看看你有没有已有的配置...
+
+        [调用 paper_profile()]
+
+        你还没有设置研究方向。我先看看有哪些预设模板：
+
+        [调用 paper_templates_list()]
+
+        有几个可选的研究模板：
+
+        1. **ai-hardware** — AI for Hardware Design
+           包含: EDA, circuit design, high-level synthesis, logic synthesis
+        2. **nlp** — Natural Language Processing
+           包含: language modeling, text generation, RAG
+        3. **cv** — Computer Vision
+           包含: image recognition, object detection, segmentation
+        4. **ml-theory** — Machine Learning Theory
+           包含: optimization, generalization, statistical learning
+
+        你的研究方向跟哪个比较接近？或者直接告诉我你在做什么研究，
+        我帮你定制。
+
+You: 我做 EDA 方向的，主要关注用 AI 做电路设计，特别是 placement 和 routing
+
+Claude: 明白！我基于 ai-hardware 模板，再结合你的具体方向来配置：
+
+        **Topics（研究主题）：**
+        - circuit design, EDA, chip placement, routing
+        - high-level synthesis, logic synthesis
+        - physical design, floorplanning
+
+        **Keywords（搜索关键词）：**
+        - transformer, GNN, reinforcement learning
+        - netlist, timing optimization, HPWL
+        - macro placement, global routing
+
+        [调用 paper_sources_list()]
+
+        推荐启用以下 arXiv 分类：
+        - **arxiv:cs.AR** — Hardware Architecture（核心）
+        - **arxiv:cs.AI** — Artificial Intelligence
+        - **arxiv:cs.LG** — Machine Learning
+
+        这样配置可以吗？需要调整吗？
+
+You: 可以，再加一个 cs.PL
+
+Claude: 好的。
+
+        [调用 paper_profile_update(
+            topics=["circuit design", "EDA", "chip placement", "routing",
+                    "high-level synthesis", "logic synthesis",
+                    "physical design", "floorplanning"],
+            keywords=["transformer", "GNN", "reinforcement learning",
+                      "netlist", "timing optimization", "HPWL",
+                      "macro placement", "global routing"]
+        )]
+
+        [调用 paper_sources_enable(
+            source_ids=["arxiv:cs.AR", "arxiv:cs.AI", "arxiv:cs.LG", "arxiv:cs.PL"]
+        )]
+
+        ✅ 研究方向已保存！已启用 4 个 arXiv 分类。
+
+        要不要现在就收集一周的论文试试看效果？
+
+You: 好
+
+Claude: [调用 paper_collect(days=7)]
+
+        ✅ 收集完成！
+
+        - 收集论文：340 篇
+        - 新增：312 篇
+        - 重复跳过：28 篇
+        - LLM 评分：312 篇已完成
+
+        要看看今天的推荐吗？输入 /start-my-day 或者直接告诉我。
+
+You: 看看
+
+Claude: [调用 paper_digest()]
+
+        📋 **今日论文推荐 — 2026-03-13**
+
+        ## 高置信推荐（6 篇）
+
+        ### 1. [[RL-Placer: Deep RL for Chip Macro Placement]]
+        - **评分**: 9.2/10
+        - **作者**: Zhang et al. (PKU)
+        - **核心贡献**: 提出新的 RL 框架做 macro placement，在 ISPD 上比
+          传统方法快 3.2×
+        - → 跟你的 "placement + RL" 方向高度匹配
+
+        ### 2. [[GNN-Driven Routing Optimization]]
+        - **评分**: 8.7/10
+        - **作者**: Li et al. (UCSD)
+        - **核心贡献**: 用 GNN 预测 routing congestion，减少 DRC 违规 45%
+
+        ...（共 6 篇）
+
+        ## 补充参考（12 篇）
+        ...
+
+        需要深入看哪篇？告诉我序号或标题。
+```
+
+---
+
+## 8 个 Slash 命令详解
+
+### 1. `/start-my-day` — 每日开工
+
+每天早上用一次，收集新论文并看推荐。
+
+```
+You: /start-my-day
+
+Claude: 正在收集今日论文...
+
+        [调用 paper_collect(days=1)]
+
+        收集完成：47 篇新论文，已完成 LLM 评分。
+
+        [调用 paper_digest()]
+
+        📋 **今日论文推荐 — 2026-03-14**
+
+        ## 今日概览
+
+        今日推荐的 5 篇论文主要聚焦于 **电路布局优化** 和 **HLS 自动化**。
+
+        ## 高置信推荐（5 篇）
+
+        ### 1. [[Transformer-Based Placement Engine]]
+        - **作者**: Wang et al.
+        - **评分**: 9.1/10
+        - **链接**: [arXiv](https://arxiv.org/abs/2603.04567)
+        - **一句话总结**: 首次将 vision transformer 引入 chip placement
+
+        ### 2. [[Diffusion Models for VLSI Floorplanning]]
+        - **作者**: Chen et al.
+        - **评分**: 8.5/10
+        - **链接**: [arXiv](https://arxiv.org/abs/2603.04321)
+        - **一句话总结**: 用 diffusion model 生成 floorplan 方案
+
+        ...
+
+        ## 阅读建议
+
+        建议先阅读第 1 篇了解 transformer 在 placement 中的新应用，
+        再关注第 2 篇的 diffusion 方法——这两种生成式方法的对比很有价值。
+
+        需要深入分析哪篇？
+
+You: 第 1 篇展开
+
+Claude: [调用 paper_show("arxiv:2603.04567")]
+
+        📄 **Transformer-Based Placement Engine**
+
+        | 字段 | 值 |
+        |------|---|
+        | arXiv ID | 2603.04567 |
+        | 作者 | Wang, Li, Zhang (Tsinghua) |
+        | 日期 | 2026-03-12 |
+        | 分类 | cs.AR, cs.AI |
+        | 评分 | 9.1/10 |
+
+        **摘要翻译**
+        > 本文提出一种基于 Vision Transformer 的芯片布局引擎。通过将
+        > netlist 表示为图像化的 2D 特征图，利用 self-attention 机制
+        > 捕捉宏单元间的全局依赖关系...
+
+        **评分理由**
+        与你的 "chip placement + transformer" 方向高度匹配，方法新颖且
+        实验充分。
+
+        要深入分析这篇吗？我可以生成一份结构化笔记。
+
+You: 好的，帮我分析
+
+Claude: (进入 paper-analyze 流程，见下方)
+```
+
+---
+
+### 2. `/paper-search <query>` — 搜索论文
+
+在本地论文库中搜索。
+
+```
+You: /paper-search attention mechanism for EDA
+
+Claude: [调用 paper_search("attention mechanism for EDA")]
+
+        找到 8 篇相关论文：
+
+        1. **AttentionPlacer: Cross-Attention for Chip Layout** — 评分 8.9/10
+           首次将 cross-attention 应用于 macro placement
+
+        2. **Self-Attention in Logic Synthesis** — 评分 7.4/10
+           用 self-attention 优化逻辑综合流程
+
+        3. **Multi-Head Attention for Timing Analysis** — 评分 8.1/10
+           attention 机制预测时序违规
+
+        4. **Transformer-EDA: A Survey** — 评分 8.6/10
+           EDA 领域 transformer 应用综述
+
+        ...
+
+        需要查看某篇的详细信息吗？告诉我编号。
+
+You: 看看第 4 篇
+
+Claude: [调用 paper_show("arxiv:2501.07890")]
+
+        📄 **Transformer-EDA: A Comprehensive Survey**
+        ...
+```
+
+**自然语言也可以，不一定要用 slash 命令：**
+
+```
+You: 有没有用 GNN 做 routing 的论文？
+
+Claude: 我帮你搜搜看。
+
+        [调用 paper_search("GNN routing graph neural network")]
+
+        找到 5 篇相关论文：
+        ...
+```
+
+---
+
+### 3. `/paper-analyze <paper_id>` — 深度分析
+
+生成结构化分析笔记。
+
+```
+You: /paper-analyze 2603.04567
+
+Claude: [调用 paper_show("arxiv:2603.04567")]
+
+        我来生成这篇论文的深度分析：
+
+        ---
+
+        ## Transformer-Based Placement Engine — 深度分析
+
+        ### 核心信息
+
+        | 字段 | 值 |
+        |------|---|
+        | arXiv ID | 2603.04567 |
+        | 作者 | Wang, Li, Zhang (Tsinghua) |
+        | 发布时间 | 2026-03-12 |
+        | 评分 | 9.1/10 |
+
+        ### 摘要翻译
+
+        本文提出一种基于 Vision Transformer 的芯片布局引擎。通过将
+        netlist 表示为图像化的 2D 特征图，利用 self-attention 机制
+        捕捉宏单元间的全局依赖关系，实现端到端的 placement 优化。
+
+        ### 方法概述
+
+        **核心思想**
+        将 chip placement 问题转化为图像到图像的预测任务。
+
+        **方法框架**
+        1. 输入：netlist → 2D feature map（每个 cell 占一个 patch）
+        2. 编码器：ViT encoder 提取全局 cell 间关系
+        3. 解码器：预测每个 cell 的最优坐标
+
+        **关键设计**
+        - Position encoding 编码 cell 的物理约束
+        - Cross-attention 层融合 timing 信息
+
+        ### 实验结果
+
+        | Benchmark | HPWL 改进 | 运行时间 | 对比方法 |
+        |-----------|----------|---------|---------|
+        | ISPD-2015 | -15.3%   | 2.1h    | DREAMPlace |
+        | ICCAD-2019| -12.7%   | 3.4h    | ePlace |
+
+        ### 深度分析
+
+        **优势**
+        - 全局感受野，避免传统方法的局部最优
+        - 端到端训练，无需手工特征工程
+
+        **局限**
+        - 计算开销大（ViT 的 O(n²) 复杂度）
+        - 仅验证了 macro placement，standard cell 未涉及
+
+        **适用场景**
+        适合中等规模（< 10K macros）的 placement 问题
+
+        ---
+
+        分析完成。要保存到文件吗？
+
+You: 保存到 notes/transformer-placement.md
+
+Claude: [写入 notes/transformer-placement.md]
+
+        ✅ 已保存到 `notes/transformer-placement.md`
+
+        要继续分析其他论文吗？
+```
+
+---
+
+### 4. `/paper-collect [days]` — 收集论文
+
+手动触发论文收集（`/start-my-day` 已包含此步骤，通常不需要单独用）。
+
+```
+You: /paper-collect 14
+
+Claude: 正在收集最近 14 天的论文...
+
+        [调用 paper_collect(days=14)]
+
+        ## 收集完成
+
+        - 收集论文：892 篇
+        - 新增论文：645 篇
+        - 重复跳过：247 篇
+        - LLM 评分：645 篇
+
+        [调用 paper_stats()]
+
+        ## 库概览
+
+        - 总计：2,139 篇
+        - 高置信：287 篇
+        - 待评分：0 篇
+        - 热门方向：cs.AI (563), cs.LG (421), cs.AR (312)
+
+        要看 digest 吗？
+
+You: 看看
+
+Claude: [调用 paper_digest()]
+        ...
+```
+
+---
+
+### 5. `/paper-setup` — 配置研究方向
+
+见上方「第一次使用」的完整示例。也可以随时用来更新方向：
+
+```
+You: /paper-setup
+
+Claude: [调用 paper_profile()]
+
+        你当前的研究方向：
+
+        **Topics**: circuit design, EDA, chip placement, routing, ...
+        **Keywords**: transformer, GNN, reinforcement learning, ...
+        **Sources**: cs.AR, cs.AI, cs.LG, cs.PL
+
+        需要修改什么吗？
+
+You: 最近在关注 diffusion model，帮我加上
+
+Claude: 好的，我帮你加上 diffusion model 相关的关键词：
+
+        新增 Keywords:
+        - diffusion model
+        - denoising diffusion
+        - score-based generative model
+
+        Topics 也加上：
+        - generative models for EDA
+
+        [调用 paper_profile_update(
+            topics=[...现有..., "generative models for EDA"],
+            keywords=[...现有..., "diffusion model", "denoising diffusion",
+                      "score-based generative model"]
+        )]
+
+        ✅ 已更新！下次收集时会用新的关键词评分。
+        要现在重新收集看看效果吗？
+```
+
+---
+
+### 6. `/paper-compare` — 多篇对比（v02）
+
+横向比较多篇论文的方法、结果、适用场景。
+
+```
+You: /paper-compare
+
+Claude: 你想对比哪些论文？
+        可以给我 arXiv ID 列表，或者告诉我一个主题，我帮你找。
+
+You: 对比一下 RL 做 placement 的几篇论文
+
+Claude: 我先搜一下：
+
+        [调用 paper_search("reinforcement learning placement")]
+
+        找到 7 篇相关论文：
+        1. RL-Placer (2026) — 评分 9.2
+        2. ChipFormer (2025) — 评分 8.8
+        3. MaskPlace (2024) — 评分 8.3
+        4. DeepPlace (2024) — 评分 7.9
+        5. GraphPlace (2025) — 评分 8.1
+        6. PRNet (2023) — 评分 7.5
+        7. PlaceRL (2024) — 评分 7.2
+
+        你想对比哪几篇？可以告诉我编号。
+
+You: 1, 2, 3, 5
+
+Claude: 你想从哪些维度对比？
+        a) 方法架构
+        b) 实验结果 (benchmark)
+        c) 适用场景
+        d) 全部
+
+You: a 和 b
+
+Claude: [调用 paper_compare(
+            paper_ids=["arxiv:2602.01234", "arxiv:2501.05678",
+                       "arxiv:2401.09012", "arxiv:2504.03456"],
+            aspects=["methodology", "results"]
+        )]
+
+        ## RL Placement 方法对比
+
+        ### 方法架构
+
+        | 论文 | RL 算法 | 状态表示 | 动作空间 | 奖励函数 |
+        |------|---------|---------|---------|---------|
+        | RL-Placer | PPO | Graph embedding | 连续坐标 | HPWL + congestion |
+        | ChipFormer | SAC | Transformer encoding | 网格位置 | HPWL + timing |
+        | MaskPlace | DQN + mask | CNN feature map | 候选位置集 | HPWL |
+        | GraphPlace | A2C | GNN embedding | 连续坐标 | 加权 HPWL |
+
+        ### 实验结果
+
+        | 论文 | Benchmark | HPWL 改进 | 运行时间 | vs. 基线 |
+        |------|-----------|----------|---------|---------|
+        | RL-Placer | ISPD-2015 | -15.3% | 2.1h | DREAMPlace |
+        | ChipFormer | MMS | -11.8% | 1.5h | ePlace |
+        | MaskPlace | ISPD-2015 | -8.4% | 4.2h | DREAMPlace |
+        | GraphPlace | ICCAD-2019 | -10.1% | 2.8h | RePlAce |
+
+        ### 分析总结
+
+        - **最佳 HPWL**: RL-Placer 效果最好，得益于 PPO 的稳定训练 +
+          graph embedding 的全局视野
+        - **最快速度**: ChipFormer 因为用了 SAC 的离策略学习，
+          sample efficiency 最高
+        - **Trade-off**: MaskPlace 的离散动作空间简化了问题，但限制了精度
+        - **建议**: 如果你追求精度用 RL-Placer 框架，追求速度用 ChipFormer
+
+        要保存这个对比表格吗？或者基于这些写 survey？
+
+You: 保存到 notes/rl-placement-comparison.md
+
+Claude: [写入文件]
+        ✅ 已保存到 `notes/rl-placement-comparison.md`
+
+You: 顺便导出这几篇的 BibTeX
+
+Claude: [调用 paper_export(paper_ids, format="bibtex")]
+
+        导出到哪个文件？
+
+You: refs/placement.bib
+
+Claude: [写入文件]
+        ✅ 已导出 4 条 BibTeX 到 `refs/placement.bib`
+```
+
+---
+
+### 7. `/paper-survey <topic>` — 生成文献综述（v02）
+
+从搜索到综述的全流程。
+
+```
+You: /paper-survey Reinforcement Learning for Chip Placement
+
+Claude: 我来帮你生成这个方向的文献综述。
+
+        首先分析关键词：
+        - 主要: reinforcement learning, chip placement
+        - 扩展: macro placement, VLSI, floorplanning, optimization
+        - 相关: deep RL, policy gradient, graph neural network
+
+        这些关键词覆盖够吗？
+
+You: 加上 simulated annealing 作为传统方法的对比
+
+Claude: 好的。先搜本地库：
+
+        [调用 paper_search("RL chip placement GNN SA floorplanning")]
+
+        本地找到 12 篇相关论文。要不要从 arXiv 在线补充搜索？
+
+You: 搜一下
+
+Claude: [调用 paper_search_online(
+            "reinforcement learning chip placement optimization"
+        )]
+
+        线上找到 25 篇新论文。合并去重后共 34 篇候选。
+
+        以下是候选列表（按相关度排序）：
+
+        | # | 标题 | 年份 | 评分 | 来源 |
+        |---|------|------|------|------|
+        | 1 | RL-Placer: Deep RL for... | 2026 | 9.2 | 本地 |
+        | 2 | ChipFormer: Transformer... | 2025 | 8.8 | 本地 |
+        | 3 | A Survey of ML for EDA... | 2025 | 8.5 | arXiv |
+        | ... | | | | |
+
+        你想把哪些纳入 survey？可以告诉我编号，或者"全选"。
+
+You: 选前 15 篇吧
+
+Claude: 好的，15 篇确认。Survey 要包含哪些章节？
+
+        a) Background & Motivation
+        b) 方法分类与对比
+        c) 实验结果汇总
+        d) Open Problems & Future Directions
+        e) 全部
+
+You: 全部
+
+Claude: 正在获取这 15 篇论文的详细信息...
+
+        [调用 paper_batch_show(15 篇 IDs)]
+
+        生成 survey 草稿中...
+
+        ---
+
+        # Reinforcement Learning for Chip Placement: A Survey
+
+        ## 1. 引言与背景
+
+        芯片布局（chip placement）是 VLSI 物理设计中的核心问题。传统方法
+        如模拟退火（simulated annealing）和解析方法（analytical placement）
+        已有数十年研究...近年来，深度强化学习的引入为这一问题带来了新思路。
+
+        本文综述了 2023-2026 年间 15 篇代表性工作...
+
+        ## 2. 方法分类
+
+        ### 2.1 基于 Policy Gradient 的方法
+        ...
+
+        ### 2.2 基于 Value-Based RL 的方法
+        ...
+
+        ### 2.3 混合方法（RL + 传统优化）
+        ...
+
+        ## 3. 方法对比
+
+        | 论文 | 方法类别 | 状态表示 | 核心创新 | HPWL 改进 |
+        |------|---------|---------|---------|----------|
+        | ... | ... | ... | ... | ... |
+
+        ## 4. 实验对比
+
+        ...
+
+        ## 5. 研究空白与未来方向
+
+        1. **可扩展性**：现有方法大多在 < 10K macros 的规模上验证
+        2. **迁移学习**：跨设计的策略迁移仍是挑战
+        3. **timing-aware**：多数方法仅优化 HPWL，未考虑时序约束
+        ...
+
+        ## 参考文献
+
+        [1] Zhang et al., "RL-Placer: ..." arXiv:2602.01234
+        [2] ...
+
+        ---
+
+        Survey 草稿完成（约 4000 字）。看看需要修改哪里？
+
+You: Background 部分太短了，加一些传统方法的发展历程
+
+Claude: 好的，我来补充传统 placement 方法的背景：
+
+        (补充 simulated annealing 的经典工作、analytical placement
+         的代表方法如 ePlace/DREAMPlace 的演进...)
+
+        修改完成。还需要调整其他地方吗？
+
+You: 可以了，保存吧
+
+Claude: 保存到哪个文件？
+
+You: survey/rl-placement-survey.md
+
+Claude: [写入文件]
+
+        ✅ 已保存到 `survey/rl-placement-survey.md`
+
+        要导出这 15 篇的 BibTeX 吗？
+
+You: 好
+
+Claude: [调用 paper_export(15 篇 IDs, format="bibtex")]
+
+        导出到 `survey/rl-placement-refs.bib` 可以吗？
+
+You: 行
+
+Claude: [写入文件]
+
+        ✅ 已导出 15 条 BibTeX 到 `survey/rl-placement-refs.bib`
+
+        全部完成！文件列表：
+        - `survey/rl-placement-survey.md` — 综述全文
+        - `survey/rl-placement-refs.bib` — BibTeX 引用
+```
+
+---
+
+### 8. `/paper-download <paper_id>` — 下载 PDF（v02）
+
+```
+You: /paper-download 2602.01234
+
+Claude: [调用 paper_download(paper_ids=["arxiv:2602.01234"])]
+
+        ✅ 已下载：
+        - papers/2602.01234_RL-Placer.pdf (2.3 MB)
+
+        要阅读这篇吗？
+
+You: 帮我下载刚才 survey 里的前 5 篇
+
+Claude: [调用 paper_download(paper_ids=[前 5 篇 IDs])]
+
+        下载结果：
+        ✅ papers/2602.01234_RL-Placer.pdf — 已存在，跳过
+        ✅ papers/2501.05678_ChipFormer.pdf — 2.1 MB
+        ✅ papers/2401.09012_MaskPlace.pdf — 1.8 MB
+        ✅ papers/2504.03456_GraphPlace.pdf — 2.5 MB
+        ✅ papers/2503.07890_ML-EDA-Survey.pdf — 3.2 MB
+
+        5 篇全部就绪。要读哪篇？
+```
+
+---
+
+## 自然语言交互
+
+除了 slash 命令，你也可以用自然语言。Claude Code 会自动识别论文相关意图并调用 MCP 工具。
+
+### 写代码时查论文
+
+```
+You: 我在实现一个 attention-based placement engine，有没有相关论文？
+
+Claude: 我帮你搜搜看。
+
+        [调用 paper_search("attention placement engine circuit")]
+
+        找到 6 篇相关论文：
+
+        | # | 标题 | 评分 |
+        |---|------|------|
+        | 1 | AttentionPlacer: Cross-Attention for... | 8.9 |
+        | 2 | Self-Attention in VLSI Layout | 7.4 |
+        | 3 | DREAMPlace 4.0: Attention-Enhanced... | 8.1 |
+        | ... | | |
+
+        第 1 篇和你的方向最接近。要看详细分析吗？
+
+You: 第 1 篇展开
+
+Claude: [调用 paper_show("arxiv:2601.03421")]
+
+        📄 **AttentionPlacer: Cross-Attention for Chip Placement**
+        ...
+
+        与你代码的关联：
+        你当前实现的 attention-based placement engine 可以参考
+        他们的 cross-attention 设计（Section 3.2），特别是
+        position encoding 的处理方式。
+
+You: 帮我把核心方法记到 notes/attention-placement.md
+
+Claude: [写入文件]
+        ✅ 已保存到 `notes/attention-placement.md`
+```
+
+### 随时调整方向
+
+```
+You: 最近项目转向做 timing optimization 了，帮我更新一下
+
+Claude: [调用 paper_profile()]
+
+        当前 Profile 里没有 timing 相关的关键词。我帮你加上：
+
+        新增 Topics:
+        - timing optimization, static timing analysis
+
+        新增 Keywords:
+        - slack, critical path, setup/hold violation
+
+        [调用 paper_profile_update(...)]
+
+        ✅ 已更新。下次 /start-my-day 就会推荐 timing 相关的论文了。
+```
+
+### 中途切换任务
+
+```
+You: 对了，我之前看过一篇 LoRA 做 EDA 的论文，帮我找找
+
+Claude: [调用 paper_search("LoRA EDA fine-tuning")]
+
+        本地库找到 2 篇：
+        1. LoRA-EDA: Parameter-Efficient Fine-Tuning for... — 7.8
+        2. Efficient LLM Adaptation for Circuit Design — 8.2
+
+        本地只有 2 篇。要从 arXiv 在线搜一下补充吗？
+
+You: 搜一下
+
+Claude: [调用 paper_search_online("LoRA fine-tuning EDA circuit design")]
+
+        在线找到 8 篇新论文，其中 5 篇已自动加入本地库。
+        合并后共 10 篇：
+        ...
+```
+
+---
+
+## 完整工作日场景
+
+以下是一个研究员的典型工作日：
+
+```
+08:00  /start-my-day
+       → 收集 47 篇新论文 → 推荐 5 篇高置信
+
+08:10  "第 2 篇看看"
+       → 展示论文详情
+
+08:15  /paper-analyze 2603.04567
+       → 深度分析 → 保存到 notes/
+
+10:30  （写代码中）"这个 GNN aggregation 有论文讲过吗？"
+       → paper_search → 找到 3 篇 → 展开第 1 篇
+
+14:00  /paper-compare
+       → 选 4 篇 RL placement 论文 → 对比方法和结果
+
+15:00  /paper-survey AI for Chip Placement
+       → 搜索 → 选 15 篇 → 全章节 → 生成综述 → 修改 → 保存
+
+16:30  "导出今天看过的论文 BibTeX"
+       → paper_export → refs.bib
+
+17:00  "帮我把那 4 篇 PDF 下载一下"
+       → paper_download → papers/ 目录
+```
+
+---
+
+## 交互设计原则
+
+paper-agent 在 Claude Code 中的每次交互都遵循同一个循环：
+
+```
+研究员发起（自然语言 / slash 命令）
+    ↓
+Claude Code 理解意图 → 确认/澄清
+    ↓
+调用 MCP tool(s) → 获取数据
+    ↓
+格式化呈现（中文、表格、wikilink）
+    ↓
+追问下一步（保存？继续？切换？）
+    ↓
+研究员反馈 → 循环
+```
+
+Claude Code 在每个环节：
+- **理解**：把模糊的描述转化为精确的查询
+- **确认**：不确定时主动追问
+- **呈现**：把 JSON 转化为人类友好的格式
+- **引导**：每步结束后建议下一步
+- **修改**：结果不满意时支持迭代
+
+---
+
+## 故障排查
+
+### MCP 连接失败
+
+```
+You: /start-my-day
+Claude: ❌ 无法连接到 paper-agent MCP server
+```
+
+检查：
+1. `paper-agent-mcp` 是否已安装：`which paper-agent-mcp`
+2. `.mcp.json` 是否存在：`ls .mcp.json`
+3. 重新配置：`paper-agent setup claude-code`
+
+### 论文库为空
+
+```
+Claude: 库中没有论文。先收集一些？
+```
+
+确认已初始化 profile：
+- 输入 `/paper-setup` 配置研究方向
+- 然后 `/start-my-day` 收集
+
+### API Key 失效
+
+```
+Claude: LLM 评分失败：API key invalid
+```
+
+在终端重新配置：`paper-agent init`
+
+---
+
+## 与 CLI 的对比
+
+| 场景 | CLI（终端） | Claude Code |
+|------|-----------|-------------|
+| 查论文 | `paper-agent search "query"` | "帮我查 xxx 论文" |
+| 每日推荐 | `collect -d 1 && digest`（两步） | `/start-my-day`（一步） |
+| 分析论文 | `show <id>`（看原始数据） | `/paper-analyze`（结构化中文笔记） |
+| 保存笔记 | 自己复制粘贴 | "保存到 notes/xxx.md" |
+| 多篇对比 | 不支持 | `/paper-compare`（对比表格 + 分析） |
+| 写综述 | 不支持 | `/paper-survey`（全流程引导） |
+| 上下文 | 需要在终端和 IDE 间切换 | AI 知道你在写什么代码 |
+| 语言 | 英文命令 + 英文输出 | 自然语言输入 + 中文输出 |

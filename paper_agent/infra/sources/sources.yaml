@@ -1,0 +1,436 @@
+# Paper Agent 数据源配置文件
+# 此文件定义所有可用的论文数据源
+
+# ============================================
+# arXiv 分类
+# ============================================
+arxiv_categories:
+  cs.AI:
+    name: "Artificial Intelligence"
+    description: "Covers all areas of AI except Vision, Robotics, Learning"
+
+  cs.CL:
+    name: "Computation and Language"
+    description: "Natural language processing, computational linguistics"
+
+  cs.CV:
+    name: "Computer Vision and Pattern Recognition"
+    description: "Image processing, computer vision, pattern recognition"
+
+  cs.LG:
+    name: "Machine Learning"
+    description: "Machine learning, neural networks, deep learning"
+
+  cs.AR:
+    name: "Hardware Architecture"
+    description: "Computer architecture, FPGA, ASIC"
+
+  cs.NE:
+    name: "Neural and Evolutionary Computing"
+    description: "Neural networks, genetic algorithms"
+
+  cs.RO:
+    name: "Robotics"
+    description: "Robotics, autonomous systems"
+
+  cs.MA:
+    name: "Multiagent Systems"
+    description: "Multi-agent systems, game theory"
+
+  eess.SY:
+    name: "Systems and Control"
+    description: "Control systems, signal processing"
+
+# ============================================
+# 学术会议配置
+# ============================================
+conferences:
+
+  # ========== AI/ML 综合会议 ==========
+  neurips:
+    name: "NeurIPS"
+    full_name: "Conference on Neural Information Processing Systems"
+    area: ["Machine Learning", "AI"]
+    rank: "A*"
+    api_type: "openreview"
+    api_config:
+      venue_id: "NeurIPS.cc"
+    url: ""
+    enabled: true
+
+  icml:
+    name: "ICML"
+    full_name: "International Conference on Machine Learning"
+    area: ["Machine Learning"]
+    rank: "A*"
+    api_type: "openreview"
+    api_config:
+      venue_id: "ICML.cc"
+    url: ""
+    enabled: true
+
+  iclr:
+    name: "ICLR"
+    full_name: "International Conference on Learning Representations"
+    area: ["Machine Learning", "Deep Learning"]
+    rank: "A*"
+    api_type: "openreview"
+    api_config:
+      venue_id: "ICLR.cc"
+    url: ""
+    enabled: true
+
+  aaai:
+    name: "AAAI"
+    full_name: "AAAI Conference on Artificial Intelligence"
+    area: ["AI"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/aaai"
+    url: ""
+    enabled: true
+
+  ijcai:
+    name: "IJCAI"
+    full_name: "International Joint Conference on Artificial Intelligence"
+    area: ["AI"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/ijcai"
+    url: ""
+    enabled: true
+
+  # ========== NLP 专业会议 ==========
+  acl:
+    name: "ACL"
+    full_name: "Annual Meeting of the Association for Computational Linguistics"
+    area: ["NLP"]
+    rank: "A*"
+    api_type: "acl_anthology"
+    api_config:
+      venue_key: "acl"
+    url: "https://aclanthology.org/"
+    enabled: true
+
+  emnlp:
+    name: "EMNLP"
+    full_name: "Empirical Methods in Natural Language Processing"
+    area: ["NLP"]
+    rank: "A"
+    api_type: "acl_anthology"
+    api_config:
+      venue_key: "emnlp"
+    url: "https://aclanthology.org/"
+    enabled: true
+
+  naacl:
+    name: "NAACL"
+    full_name: "North American Chapter of the Association for Computational Linguistics"
+    area: ["NLP"]
+    rank: "A"
+    api_type: "acl_anthology"
+    api_config:
+      venue_key: "naacl"
+    url: "https://aclanthology.org/"
+    enabled: true
+
+  coling:
+    name: "COLING"
+    full_name: "International Conference on Computational Linguistics"
+    area: ["NLP"]
+    rank: "B"
+    api_type: "acl_anthology"
+    api_config:
+      venue_key: "coling"
+    url: "https://aclanthology.org/"
+    enabled: false
+
+  # ========== CV 专业会议 ==========
+  cvpr:
+    name: "CVPR"
+    full_name: "Conference on Computer Vision and Pattern Recognition"
+    area: ["Computer Vision"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/cvpr"
+    url: ""
+    enabled: true
+
+  iccv:
+    name: "ICCV"
+    full_name: "International Conference on Computer Vision"
+    area: ["Computer Vision"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/iccv"
+    url: ""
+    enabled: true
+
+  eccv:
+    name: "ECCV"
+    full_name: "European Conference on Computer Vision"
+    area: ["Computer Vision"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/eccv"
+    url: ""
+    enabled: true
+
+  # ========== EDA/硬件会议 ==========
+  dac:
+    name: "DAC"
+    full_name: "Design Automation Conference"
+    area: ["EDA", "Circuit Design"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/dac"
+    url: ""
+    enabled: true
+
+  iccad:
+    name: "ICCAD"
+    full_name: "International Conference on Computer-Aided Design"
+    area: ["EDA", "Circuit Design"]
+    rank: "A"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/iccad"
+    url: ""
+    enabled: true
+
+  date:
+    name: "DATE"
+    full_name: "Design, Automation and Test in Europe"
+    area: ["EDA", "Embedded Systems"]
+    rank: "A"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/date"
+    url: ""
+    enabled: true
+
+  isca:
+    name: "ISCA"
+    full_name: "International Symposium on Computer Architecture"
+    area: ["Computer Architecture"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/isca"
+    url: ""
+    enabled: true
+
+  micro:
+    name: "MICRO"
+    full_name: "IEEE/ACM International Symposium on Microarchitecture"
+    area: ["Computer Architecture"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/micro"
+    url: ""
+    enabled: false
+
+  asplos:
+    name: "ASPLOS"
+    full_name: "Architectural Support for Programming Languages and Operating Systems"
+    area: ["Computer Architecture", "Systems"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/asplos"
+    url: ""
+    enabled: false
+
+# ============================================
+# 其他数据源
+# ============================================
+other_sources:
+  openreview:
+    name: "OpenReview"
+    description: "Open peer review platform for scientific conferences"
+    url: ""
+    api_type: "openreview_api"
+    enabled: false
+
+  papers_with_code:
+    name: "Papers with Code"
+    description: "Papers with code implementations and benchmarks"
+    url: ""
+    api_type: "pwc_api"
+    enabled: false
+
+  semantic_scholar:
+    name: "Semantic Scholar"
+    description: "AI-powered research tool for scientific literature"
+    url: ""
+    api_type: "s2_api"
+    api_key_required: true
+    enabled: false
+
+  dblp:
+    name: "DBLP"
+    description: "Computer Science Bibliography"
+    url: ""
+    api_type: "dblp_api"
+    enabled: false
+
+# ============================================
+# 研究领域模板（用于智能推荐）
+# ============================================
+research_area_templates:
+
+  llm_nlp:
+    name: "Large Language Models & NLP"
+    description: "研究大语言模型、自然语言处理、文本生成等"
+    topics:
+      - "Large Language Models"
+      - "Transformer Architecture"
+      - "Natural Language Processing"
+      - "Text Generation"
+    keywords:
+      - "transformer"
+      - "BERT"
+      - "GPT"
+      - "attention mechanism"
+      - "language model"
+      - "pre-training"
+      - "fine-tuning"
+      - "prompt engineering"
+    recommended_sources:
+      arxiv: ["cs.CL", "cs.LG", "cs.AI"]
+      conferences: ["acl", "emnlp", "naacl", "neurips", "icml", "iclr"]
+
+  computer_vision:
+    name: "Computer Vision"
+    description: "研究图像识别、目标检测、图像生成等"
+    topics:
+      - "Computer Vision"
+      - "Image Recognition"
+      - "Object Detection"
+      - "Image Generation"
+    keywords:
+      - "CNN"
+      - "vision transformer"
+      - "ViT"
+      - "object detection"
+      - "segmentation"
+      - "image classification"
+      - "diffusion model"
+    recommended_sources:
+      arxiv: ["cs.CV", "cs.LG", "cs.AI"]
+      conferences: ["cvpr", "iccv", "eccv", "neurips", "icml"]
+
+  reinforcement_learning:
+    name: "Reinforcement Learning"
+    description: "研究强化学习、多智能体系统、游戏AI等"
+    topics:
+      - "Reinforcement Learning"
+      - "Multi-Agent Systems"
+      - "Game AI"
+      - "Decision Making"
+    keywords:
+      - "Q-learning"
+      - "policy gradient"
+      - "actor-critic"
+      - "multi-agent"
+      - "reward shaping"
+      - "RLHF"
+    recommended_sources:
+      arxiv: ["cs.LG", "cs.AI", "cs.MA"]
+      conferences: ["neurips", "icml", "iclr", "aaai", "ijcai"]
+
+  circuit_design:
+    name: "Circuit Design & EDA"
+    description: "研究电路设计、硬件加速、EDA工具等"
+    topics:
+      - "Circuit Design"
+      - "Hardware Acceleration"
+      - "EDA Tools"
+      - "FPGA Design"
+    keywords:
+      - "FPGA"
+      - "ASIC"
+      - "synthesis"
+      - "placement"
+      - "routing"
+      - "timing analysis"
+      - "logic optimization"
+    recommended_sources:
+      arxiv: ["cs.AR", "eess.SY"]
+      conferences: ["dac", "iccad", "date", "isca"]
+
+  robotics:
+    name: "Robotics & Control"
+    description: "研究机器人、运动规划、控制系统等"
+    topics:
+      - "Robotics"
+      - "Motion Planning"
+      - "Control Systems"
+      - "Autonomous Systems"
+    keywords:
+      - "robot"
+      - "manipulation"
+      - "navigation"
+      - "SLAM"
+      - "control"
+      - "path planning"
+    recommended_sources:
+      arxiv: ["cs.RO", "cs.AI", "eess.SY"]
+      conferences: ["neurips", "icml", "aaai", "ijcai"]
+
+  ml_systems:
+    name: "ML Systems & Infrastructure"
+    description: "研究机器学习系统、分布式训练、模型优化等"
+    topics:
+      - "ML Systems"
+      - "Distributed Training"
+      - "Model Optimization"
+      - "Inference Acceleration"
+    keywords:
+      - "distributed training"
+      - "model compression"
+      - "quantization"
+      - "pruning"
+      - "inference"
+      - "serving"
+    recommended_sources:
+      arxiv: ["cs.LG", "cs.DC", "cs.AR"]
+      conferences: ["neurips", "icml", "isca", "asplos"]
+
+  generative_models:
+    name: "Generative Models"
+    description: "研究生成模型、扩散模型、GAN等"
+    topics:
+      - "Generative Models"
+      - "Diffusion Models"
+      - "GANs"
+      - "VAEs"
+    keywords:
+      - "diffusion"
+      - "GAN"
+      - "VAE"
+      - "generative"
+      - "image synthesis"
+      - "text-to-image"
+    recommended_sources:
+      arxiv: ["cs.CV", "cs.LG", "cs.AI"]
+      conferences: ["neurips", "icml", "iclr", "cvpr"]
+
+# ============================================
+# 用户自定义数据源（由用户添加）
+# ============================================
+custom_sources: []
+  # 示例格式：
+  # - id: "my_lab_papers"
+  #   name: "My Lab Papers"
+  #   type: "rss"
+  #   url: "https://mylab.edu/papers/rss"
+  #   enabled: true
+  #   added_date: "2026-03-12"

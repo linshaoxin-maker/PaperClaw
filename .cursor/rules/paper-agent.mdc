@@ -1,0 +1,25 @@
+---
+description: Auto-activate paper-agent MCP tools when user mentions papers, arXiv, research digests, or uses paper-related keywords.
+globs:
+alwaysApply: false
+---
+
+# Paper Agent Rule
+
+当检测到以下场景时，自动激活 paper-agent MCP 工具：
+
+## 触发条件
+
+- 用户说 "start my day" 或 "今日推荐" → 调用 `paper_collect(days=1)` + `paper_digest()`
+- 用户说 "搜索论文" 或 "paper search" + 关键词 → 调用 `paper_search(query)`
+- 用户说 "分析论文" 或 "paper-analyze" + ID → 调用 `paper_show(paper_id)` 并生成分析笔记
+- 用户说 "收集论文" 或 "paper collect" → 调用 `paper_collect()`
+- 用户提到 arXiv ID 格式（如 `2301.12345`）→ 调用 `paper_show()`
+- 用户在 AI/ML 代码中提到方法名（transformer, attention, BERT, LoRA 等）→ 建议搜索相关论文
+
+## 行为规范
+
+- 所有论文分析和摘要使用中文输出
+- 论文标题使用 `[[论文标题]]` wikilink 格式
+- 搜索结果保持精简，深度分析才展开全部内容
+- 如果 paper-agent 未初始化，引导用户运行 `paper-agent init`

@@ -212,3 +212,291 @@ paper-agent show <paper-id>
 # 随时搜索历史论文
 paper-agent search "topic you care about"
 ```
+
+## IDE Integration
+
+除了 CLI，paper-agent 还可以通过 MCP（Model Context Protocol）集成到 AI 编码工具中，让你在写代码的同时直接搜索、分析论文。
+
+### Cursor 集成
+
+```bash
+# 在你的项目目录中运行（会写入 .cursor/mcp.json + skill + rule）
+paper-agent setup cursor
+
+# 或全局安装（所有项目可用）
+paper-agent setup cursor --scope global
+```
+
+配置完成后重启 Cursor，在 Agent chat 中直接说：
+- "start my day" → 收集今日论文 + 生成推荐
+- "搜索论文 transformer" → 搜索本地论文库
+- "分析论文 2301.12345" → 生成结构化分析笔记
+
+### Claude Code 集成
+
+```bash
+# 在你的项目目录中运行（会写入 .mcp.json + .claude/commands/ + CLAUDE.md）
+paper-agent setup claude-code
+
+# 或全局注册 MCP server
+paper-agent setup claude-code --scope global
+```
+
+配置完成后在该目录运行 `claude`，可以使用：
+
+**日常命令（v01）：**
+- `/start-my-day` → 收集今日论文 + 生成推荐
+- `/paper-search transformer` → 搜索本地论文库
+- `/paper-analyze 2301.12345` → 生成结构化分析笔记
+- `/paper-collect 7` → 收集最近 7 天论文
+- `/paper-setup` → 对话式配置研究方向
+
+**多篇智能（v02）：**
+- `/paper-compare` → 多篇论文方法/结果对比
+- `/paper-survey AI for EDA` → 生成文献综述
+- `/paper-download 2301.12345` → 下载 PDF
+
+或直接自然语言："帮我找 RAG 相关的论文"
+
+### 前置条件
+
+IDE 集成依赖 paper-agent 已完成 LLM 初始化（因为要输入 API Key，这一步必须在终端）：
+
+```bash
+paper-agent init            # 配置 LLM provider 和 API key
+```
+
+研究方向配置和论文收集可以在 IDE 内完成（Claude Code: `/paper-setup`，Cursor: 直接对话）。
+
+### End-to-End 演示：从零到在 Claude Code 中用起来
+
+下面是一个**完整的真实流程**，演示一个 AI 研究员如何从安装 paper-agent 到在 Claude Code 中日常使用。
+
+#### Phase 1: 安装 + LLM 初始化（终端，约 2 分钟）
+
+```bash
+# 安装
+pipx install paper-agent          # 全局安装，paper-agent 和 paper-agent-mcp 都可用
+
+# 初始化 LLM（这一步必须在终端完成，因为要输入 API Key）
+paper-agent init
+#   LLM Provider: openai
+#   API Key: sk-xxxxx
+#   Base URL: (留空)
+#   Model: (留空)
+# ✅ 初始化完成！
+```
+
+#### Phase 2: 连接到 Claude Code（终端，约 10 秒）
+
+```bash
+# 在你自己的研究项目中运行（不是 paper-agent 源码目录）
+cd ~/my-research-project
+
+paper-agent setup claude-code
+# ✅ MCP → .mcp.json
+# ✅ Commands → .claude/commands  (/start-my-day, /paper-search, ..., /paper-setup)
+# ✅ CLAUDE.md → CLAUDE.md
+```
+
+生成的文件：
+```
+my-research-project/
+├── .mcp.json                     ← 告诉 Claude Code 启动 paper-agent-mcp
+├── CLAUDE.md                     ← 告诉 AI 有哪些工具可用
+└── .claude/
+    └── commands/
+        ├── start-my-day.md       ← /start-my-day
+        ├── paper-search.md       ← /paper-search
+        ├── paper-analyze.md      ← /paper-analyze
+        ├── paper-collect.md      ← /paper-collect
+        ├── paper-setup.md        ← /paper-setup（配置研究方向）
+        ├── paper-compare.md      ← /paper-compare（多篇对比）
+        ├── paper-survey.md       ← /paper-survey（文献综述）
+        └── paper-download.md     ← /paper-download（PDF 下载）
+```
+
+#### Phase 3: 在 Claude Code 里配置研究方向（对话式，约 3 分钟）
+
+从这里开始，**不需要再回终端了**。启动 Claude Code：
+
+```bash
+cd ~/my-research-project
+claude
+```
+
+```
+You: /paper-setup
+
+Claude: 你好！我来帮你配置 paper-agent 的研究方向。
+        先看看有没有合适的模板...
+        [调用 paper_templates_list()]
+
+        有几个预设模板：
+        1. ai-hardware — AI for Hardware Design (EDA, HLS, circuit design)
+        2. nlp — Natural Language Processing
+        3. cv — Computer Vision
+        ...
+
+        你的研究方向跟哪个比较接近？或者你也可以直接告诉我你在做什么研究。
+
+You: 我做 EDA 方向的，主要关注用 AI 方法做电路设计，特别是 placement 和 routing
+
+Claude: 明白！我根据 ai-hardware 模板 + 你的具体方向来配置：
+
+        Topics:
+        - circuit design, EDA, placement, routing
+        - high-level synthesis, logic synthesis
+
+        Keywords:
+        - transformer, GNN, reinforcement learning
+        - netlist, floorplan, timing optimization
+
+        [调用 paper_sources_list()]
+
+        推荐启用这些 arXiv 分类：
+        - arxiv:cs.AR — Hardware Architecture
+        - arxiv:cs.AI — Artificial Intelligence
+        - arxiv:cs.LG — Machine Learning
+
+        这样配置可以吗？需要调整吗？
+
+You: 可以，再加一个 cs.PL 吧
+
+Claude: [调用 paper_profile_update(
+            topics=["circuit design", "EDA", "placement", "routing", ...],
+            keywords=["transformer", "GNN", ...],
+            enable_sources=["arxiv:cs.AR", "arxiv:cs.AI", "arxiv:cs.LG", "arxiv:cs.PL"]
+        )]
+
+        ✅ Profile 已保存！要不要现在就收集一周的论文试试？
+
+You: 好
+
+Claude: [调用 paper_collect(days=7)]
+
+        ✅ 收集完成: 342 篇论文 (342 新增, 0 重复)
+        ✅ 过滤完成: 342 篇论文已评分
+
+        要看看今天的推荐吗？
+
+You: /start-my-day
+```
+
+**关键区别**：研究方向的配置从"终端跑命令填表"变成了"跟 AI 聊天确定"。AI 可以基于对话理解你的需求，主动推荐 topics、keywords、sources。
+
+#### Phase 4: 日常使用（每天）
+
+Claude Code 读取 `.mcp.json`，自动启动 `paper-agent-mcp` 进程。
+
+##### 场景 1: 早上开工 — `/start-my-day`
+
+```
+You: /start-my-day
+
+Claude: 正在收集今日论文...
+        [调用 paper_collect(days=1)]
+
+        收集完成：47 篇新论文，已完成 LLM 评分。
+
+        [调用 paper_digest()]
+
+        📋 今日论文推荐 — 2026-03-13
+
+        🔴 高置信推荐（8 篇）
+
+        1. [[Attention Is All You Need for EDA]] — 9.2/10
+           提出将 transformer 架构应用于电路布局优化，在 ISPD benchmark
+           上比传统方法快 3.2×。
+           → 与你的 "circuit design + transformer" 方向高度匹配
+
+        2. [[GNN-Driven High-Level Synthesis]] — 8.7/10
+           用图神经网络预测 HLS 设计空间中的 Pareto 前沿...
+
+        3. ...
+
+        🟡 补充参考（12 篇）
+        ...
+
+        需要深入分析哪篇？直接告诉我序号或标题。
+```
+
+##### 场景 2: 写代码时查论文
+
+```
+You: 我在实现一个 attention-based placement engine，有没有相关论文？
+
+Claude: [调用 paper_search("attention placement engine circuit")]
+
+        找到 6 篇相关论文：
+
+        | # | 标题                                      | 评分 |
+        |---|-------------------------------------------|------|
+        | 1 | AttentionPlacer: Transformer for Chip...   | 8.9  |
+        | 2 | Self-Attention Mechanisms in VLSI Layout   | 7.4  |
+        | 3 | DREAMPlace 4.0: Attention-Enhanced...      | 8.1  |
+        | ...                                                  |
+
+        第 1 篇和你的方向最接近。要看详细分析吗？
+
+You: 第 1 篇展开
+
+Claude: [调用 paper_show("arxiv:2601.03421")]
+
+        📄 [[AttentionPlacer: Transformer for Chip Placement]]
+
+        核心信息
+        - 作者: Zhang et al. (2026)
+        - 机构: PKU + ByteDance
+        - 评分: 8.9/10
+
+        摘要翻译
+        > 本文提出 AttentionPlacer，将 multi-head attention 机制
+        > 引入芯片布局优化。通过将 netlist 表示为图序列...
+
+        方法概述
+        1. 将电路 netlist 转化为 token 序列
+        2. 使用 cross-attention 捕获 cell 间的连接关系
+        3. 迭代式 placement refinement...
+
+        与你代码的关联
+        你当前实现的 attention-based placement engine 可以参考
+        他们的 cross-attention 设计（Section 3.2），特别是
+        position encoding 的处理方式。
+
+You: 帮我把这篇的核心方法记到 notes/attention-placement.md
+
+Claude: [写入文件 notes/attention-placement.md]
+
+        ✅ 已保存分析笔记到 notes/attention-placement.md
+```
+
+##### 场景 3: Cursor 中的等价体验
+
+在 Cursor 里没有 slash 命令，但通过 Skill + Rule 实现相同效果：
+
+```
+You: start my day
+
+Agent: [识别到论文相关意图，触发 paper-agent skill]
+       [调用 MCP tool: paper_collect(days=1)]
+       [调用 MCP tool: paper_digest()]
+
+       （展示同样的推荐列表）
+
+You: 搜索论文 LoRA fine-tuning for hardware design
+
+Agent: [调用 MCP tool: paper_search("LoRA fine-tuning hardware design")]
+
+       （展示搜索结果）
+```
+
+#### 对比总结
+
+| | 纯 CLI | CLI + IDE (MCP 集成) |
+|---|---|---|
+| 查论文 | 切终端 → 输命令 → 看结果 → 切回 IDE | 在对话框直接说 → 看结果 |
+| 每日推荐 | 手动跑 2 条命令 | `/start-my-day` 一步完成 |
+| 分析论文 | show → 自己读 → 自己写笔记 | 说一句话 → AI 生成结构化笔记并保存 |
+| 上下文 | 手动在终端和 IDE 间切换 | AI 知道你在写什么代码，能关联推荐 |
+| 语言 | 英文命令 + 英文输出 | 自然语言输入，中文输出 |
