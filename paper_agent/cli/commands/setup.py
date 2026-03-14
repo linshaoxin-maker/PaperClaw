@@ -100,10 +100,13 @@ def setup_cursor(
         print_error("--scope 必须是 'project' 或 'global'")
         raise typer.Exit(1)
 
-    console.print("\n[bold]下一步：[/bold]")
+    console.print("\n[bold green]✅ 安装完成！[/bold green]")
+    console.print("\n[bold]自检：[/bold]")
+    console.print("  [cyan]paper-agent doctor[/cyan]  ← 检查安装是否完整")
+    console.print("\n[bold]开始使用：[/bold]")
     console.print("  1. 重启 Cursor（或 Cmd+Shift+P → Reload Window）")
-    console.print("  2. 在 Agent chat 中说 [cyan]\"start my day\"[/cyan] 或 [cyan]\"搜索论文 transformer\"[/cyan]")
-    console.print("  3. Agent 会自动调用 paper-agent MCP 工具\n")
+    console.print("  2. 在 Agent chat 中说 [cyan]\"start my day\"[/cyan] 开始使用")
+    console.print("  3. 或直接说 [cyan]\"帮我找 transformer 相关论文\"[/cyan]\n")
 
 
 def _write_cursor_skills(skills_root: Path) -> int:
@@ -190,6 +193,24 @@ def setup_claude_code(
         raise typer.Exit(1)
 
 
+def _write_claude_skills(skills_root: Path) -> int:
+    """Write the router skill + 6 workflow skills into .claude/skills/ for Claude Code."""
+    written = 0
+
+    router_dir = skills_root / "paper-intelligence"
+    router_dir.mkdir(parents=True, exist_ok=True)
+    (router_dir / "SKILL.md").write_text(ROUTER_SKILL)
+    written += 1
+
+    for name, content in WORKFLOW_SKILLS.items():
+        skill_dir = skills_root / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(content)
+        written += 1
+
+    return written
+
+
 def _setup_claude_project(target: Path, cmd: str, args: list[str]) -> None:
     mcp_path = target / ".mcp.json"
     _merge_mcp_json(mcp_path, cmd, args)
@@ -201,24 +222,28 @@ def _setup_claude_project(target: Path, cmd: str, args: list[str]) -> None:
         (commands_dir / name).write_text(content)
     print_success(
         f"Commands → {commands_dir}  "
-        "(/start-my-day, /paper-search, /paper-analyze, /paper-collect, "
+        "(/paper, /start-my-day, /paper-search, /paper-analyze, /paper-collect, "
         "/paper-setup, /paper-compare, /paper-survey, /paper-download, "
         "/paper-triage, /paper-insight)"
     )
 
+    skills_dir = target / ".claude" / "skills"
+    count = _write_claude_skills(skills_dir)
+    print_success(f"Skills → {skills_dir} ({count} workflow skills)")
+
     claude_md = target / "CLAUDE.md"
-    if not claude_md.exists():
-        claude_md.write_text(_CLAUDE_MD)
-        print_success(f"CLAUDE.md → {claude_md}")
-    else:
-        console.print(f"  [dim]CLAUDE.md 已存在，跳过[/dim]")
+    claude_md.write_text(_CLAUDE_MD)
+    print_success(f"CLAUDE.md → {claude_md}")
 
     _init_workspace(target)
 
-    console.print("\n[bold]下一步：[/bold]")
+    console.print("\n[bold green]✅ 安装完成！[/bold green]")
+    console.print("\n[bold]自检：[/bold]")
+    console.print("  [cyan]paper-agent doctor[/cyan]  ← 检查安装是否完整")
+    console.print("\n[bold]开始使用：[/bold]")
     console.print(f"  1. 在 [cyan]{target}[/cyan] 目录运行 [cyan]claude[/cyan]")
-    console.print("  2. 试试 [cyan]/start-my-day[/cyan] 命令")
-    console.print("  3. 或直接说 [cyan]\"搜索论文 transformer\"[/cyan]\n")
+    console.print("  2. 输入 [cyan]/paper[/cyan] 查看所有功能")
+    console.print("  3. 或直接说 [cyan]\"帮我找 transformer 相关的论文\"[/cyan]\n")
 
 
 def _setup_claude_global(cmd: str, args: list[str]) -> None:
@@ -414,9 +439,11 @@ Do NOT just present data — always tell the researcher "so what".
 ## First-Run Detection
 
 At session start, silently call `paper_profile()`:
-- **No profile**: Say "看起来你还没配置研究方向，我来帮你设置？" Then guide through profile creation (same flow as /paper-setup). After saving, offer initial collection.
-- **Profile exists, empty library** (check `paper_stats()`): Say "论文库还是空的，要我帮你采集最近一周的论文吗？"
-- **Profile + library exist**: Normal operation. No special greeting.
+- **No profile**: Say "看起来你还没配置研究方向，我来帮你设置？告诉我你的研究方向就行。" Then guide through profile creation (same flow as /paper-setup). After saving, offer initial collection.
+- **Profile exists, empty library** (check `paper_stats()`): Say "研究方向已配好，论文库还是空的。要我帮你采集最近一周的论文吗？"
+- **Profile + library exist**: Normal operation. If user seems unsure what to do, suggest `/paper` to see all options.
+
+Note: The user's terminal setup flow is: `paper-agent init` (LLM config) → `paper-agent setup claude-code` (install to project) → start Claude Code. If MCP fails, tell the user to run `paper-agent doctor` in terminal to diagnose.
 
 ## Error Handling
 
@@ -425,8 +452,25 @@ At session start, silently call `paper_profile()`:
 - Online search/download fails: "在线搜索暂时不可用，可以先看本地库。" (don't show raw error)
 - Empty digest: "今天没有新论文，要搜一个主题看看？" (suggest `paper_quick_scan`)
 
+## Workflow Skills
+
+Detailed workflow definitions live in `.claude/skills/`. When handling a multi-step workflow, read the corresponding SKILL.md:
+
+| Workflow | Skill file | When to read |
+|----------|-----------|-------------|
+| Daily reading | `.claude/skills/daily-reading/SKILL.md` | /start-my-day or "今天看什么" |
+| Deep analysis | `.claude/skills/deep-dive/SKILL.md` | /paper-analyze or "分析这篇" |
+| Literature survey | `.claude/skills/literature-survey/SKILL.md` | /paper-survey or "综述" |
+| Citation trace | `.claude/skills/citation-explore/SKILL.md` | "引用链" or "谁引了" |
+| Paper triage | `.claude/skills/paper-triage/SKILL.md` | /paper-triage or "筛一下" |
+| Trend insight | `.claude/skills/research-insight/SKILL.md` | /paper-insight or "趋势" |
+| Intent routing | `.claude/skills/paper-intelligence/SKILL.md` | When unsure which workflow to use |
+
+For direct tool calls (morning_brief, auto_triage, citation_trace, quick_scan), no skill file is needed — just call the tool and present results.
+
 ## Commands
 
+- `/paper` — **main entry point** (shows what you can do, routes to the right workflow)
 - `/start-my-day` — morning brief
 - `/paper-search <query>` — search
 - `/paper-analyze <id>` — deep analysis
@@ -440,16 +484,77 @@ At session start, silently call `paper_profile()`:
 """
 
 _CLAUDE_COMMANDS: dict[str, str] = {
+    "paper.md": """\
+---
+description: "Paper Agent — unified entry point for all research paper workflows"
+allowed-tools: [
+  "mcp__paper-agent__paper_profile",
+  "mcp__paper-agent__paper_stats",
+  "mcp__paper-agent__paper_workspace_context"
+]
+---
+
+# Paper Agent
+
+Unified entry point — help the researcher decide what to do.
+
+## Process
+
+1. Silently call `paper_workspace_context()` + `paper_stats()` to understand the current state
+2. Present a personalized menu based on state:
+
+   **Paper Agent** — 你的研究助手
+
+   当前状态：[库中 N 篇论文 | 待读 X | 阅读中 Y]
+
+   ### Slash 命令
+
+   | # | 功能 | 说明 | 命令 |
+   |---|------|------|------|
+   | 1 | 每日推荐 | 收集今日论文 + 个性化推荐 | `/start-my-day` |
+   | 2 | 搜索论文 | 关键词搜索本地库 | `/paper-search <关键词>` |
+   | 3 | 深度分析 | 单篇论文结构化分析 | `/paper-analyze <ID>` |
+   | 4 | 文献综述 | 一个方向的论文梳理 | `/paper-survey <主题>` |
+   | 5 | 趋势分析 | 研究方向热度和趋势 | `/paper-insight <方向>` |
+   | 6 | 批量筛选 | 自动分流待读论文 | `/paper-triage` |
+   | 7 | 论文对比 | 多篇论文横向对比 | `/paper-compare` |
+   | 8 | 下载 PDF | 下载论文全文 | `/paper-download <ID>` |
+
+   ### 自然语言触发
+
+   不用记命令，直接说需求，我会自动路由到对应的工作流：
+
+   | 你说的话 | 触发的能力 | 背后的 Skill / 工具 |
+   |---------|----------|-------------------|
+   | "今天看什么" / "start my day" | 每日推荐 | `paper_morning_brief` 一步完成 |
+   | "搜一下 GNN placement" | 搜索论文 | `paper_search` / `paper_quick_scan` |
+   | "分析这篇" / 给出 arXiv ID | 深度分析 | deep-dive skill |
+   | "这个方向有什么工作" / "综述" | 文献综述 | literature-survey skill |
+   | "这个方向火不火" / "趋势" | 趋势分析 | research-insight skill |
+   | "筛一下" / "哪些值得看" | 批量筛选 | `paper_auto_triage` 一步完成 |
+   | "引用链" / "谁引了这篇" | 引用追踪 | `paper_citation_trace` 一步完成 |
+   | "帮我找 Attention Is All You Need" | 精确查找 + 下载 | `paper_find_and_download` |
+   | "收集论文" / "配置方向" | 采集 / 设置 | `/paper-collect` / `/paper-setup` |
+
+   直接告诉我你想做什么，或输入上面的命令。
+
+3. If user hasn't configured profile yet, skip the menu and guide through setup first
+4. If library is empty, suggest starting with `/start-my-day` or `/paper-collect`
+5. Route to the selected workflow — for skills, read the corresponding `.claude/skills/<name>/SKILL.md`
+""",
     "start-my-day.md": """\
 ---
 description: One-call morning pipeline — context recovery, collect, digest, auto-mark
 allowed-tools: [
   "mcp__paper-agent__paper_morning_brief",
-  "mcp__paper-agent__paper_show"
+  "mcp__paper-agent__paper_show",
+  "Read"
 ]
 ---
 
 # Start My Day
+
+> Workflow detail: read `.claude/skills/daily-reading/SKILL.md` for full rules, edge cases, and output templates.
 
 Generate today's personalized paper digest in one call.
 
@@ -518,6 +623,8 @@ allowed-tools: [
 ---
 
 # Paper Analyze
+
+> Workflow detail: read `.claude/skills/deep-dive/SKILL.md` for full analysis template, fork rules, and edge cases.
 
 Generate a structured deep-analysis note for a paper.
 
@@ -652,11 +759,14 @@ allowed-tools: [
   "mcp__paper-agent__paper_compare",
   "mcp__paper-agent__paper_export",
   "mcp__paper-agent__paper_group_add",
+  "Read",
   "Write"
 ]
 ---
 
 # Paper Survey
+
+> Workflow detail: read `.claude/skills/literature-survey/SKILL.md` for full survey template, quick/full mode rules, and output format.
 
 Quick-first literature survey.
 
@@ -704,11 +814,14 @@ Download PDF files for one or more papers.
 description: Batch paper screening — auto-classify into important/to_read/skip
 allowed-tools: [
   "mcp__paper-agent__paper_auto_triage",
-  "mcp__paper-agent__paper_reading_status"
+  "mcp__paper-agent__paper_reading_status",
+  "Read"
 ]
 ---
 
 # Paper Triage
+
+> Workflow detail: read `.claude/skills/paper-triage/SKILL.md` for classification rules, custom source handling, and save report format.
 
 Batch screening of papers using profile-based relevance scores.
 
@@ -738,11 +851,14 @@ description: Research trend analysis — publication trends, sub-direction heat 
 argument-hint: <topic>
 allowed-tools: [
   "mcp__paper-agent__paper_quick_scan",
-  "mcp__paper-agent__paper_trend_data"
+  "mcp__paper-agent__paper_trend_data",
+  "Read"
 ]
 ---
 
 # Research Insight
+
+> Workflow detail: read `.claude/skills/research-insight/SKILL.md` for quick/full mode rules, trend table format, and export options.
 
 Quick trend analysis for a research topic.
 

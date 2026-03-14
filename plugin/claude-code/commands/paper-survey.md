@@ -7,11 +7,14 @@ allowed-tools: [
   "mcp__paper-agent__paper_compare",
   "mcp__paper-agent__paper_export",
   "mcp__paper-agent__paper_group_add",
+  "Read",
   "Write"
 ]
 ---
 
 # Paper Survey
+
+> Workflow detail: read `.claude/skills/literature-survey/SKILL.md` for full survey template, quick/full mode rules, and output format.
 
 Quick-first literature survey.
 

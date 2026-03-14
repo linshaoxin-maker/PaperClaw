@@ -38,19 +38,35 @@ paper-agent setup claude-code
 ```
 my-research-project/
 ├── .mcp.json                      ← MCP 服务器配置
-├── CLAUDE.md                      ← 告诉 AI 可用的工具
+├── CLAUDE.md                      ← AI 行为指令（工具+交互规则+输出格式+首次检测）
+├── .paper-agent/                  ← 研究工作区（笔记/分组/日志/仪表盘）
 └── .claude/
-    └── commands/
-        ├── start-my-day.md        ← /start-my-day (one-call morning pipeline)
-        ├── paper-search.md        ← /paper-search
-        ├── paper-analyze.md       ← /paper-analyze
-        ├── paper-collect.md       ← /paper-collect
-        ├── paper-setup.md         ← /paper-setup
-        ├── paper-compare.md       ← /paper-compare
-        ├── paper-survey.md        ← /paper-survey (quick-first)
-        ├── paper-download.md      ← /paper-download
-        ├── paper-triage.md        ← /paper-triage (auto-classify)
-        └── paper-insight.md       ← /paper-insight (trend analysis)
+    ├── commands/                  ← Slash 命令
+    │   ├── paper.md               ← /paper（统一主入口）
+    │   ├── start-my-day.md        ← /start-my-day
+    │   ├── paper-search.md        ← /paper-search
+    │   ├── paper-analyze.md       ← /paper-analyze
+    │   ├── paper-collect.md       ← /paper-collect
+    │   ├── paper-setup.md         ← /paper-setup
+    │   ├── paper-compare.md       ← /paper-compare
+    │   ├── paper-survey.md        ← /paper-survey
+    │   ├── paper-download.md      ← /paper-download
+    │   ├── paper-triage.md        ← /paper-triage
+    │   └── paper-insight.md       ← /paper-insight
+    └── skills/                    ← 工作流 Skills（完整行为编排）
+        ├── paper-intelligence/    ← 路由 Skill：意图识别+分发
+        ├── daily-reading/         ← 每日开工
+        ├── deep-dive/             ← 深度分析
+        ├── literature-survey/     ← 文献综述
+        ├── citation-explore/      ← 引用链探索
+        ├── paper-triage/          ← 批量筛选
+        └── research-insight/      ← 趋势洞察
+```
+
+验证安装是否完整：
+
+```bash
+paper-agent doctor
 ```
 
 现在启动 Claude Code：
@@ -60,6 +76,7 @@ claude
 ```
 
 Claude Code 读取 `.mcp.json`，自动启动 `paper-agent-mcp` 后端。你就可以开始用了。
+不知道从哪开始？输入 `/paper` 查看所有功能。
 
 ---
 
@@ -219,7 +236,44 @@ Claude: [调用 paper_digest()]
 
 ---
 
-## 10 个 Slash 命令详解
+## 11 个 Slash 命令详解
+
+### 0. `/paper` — 统一主入口
+
+不知道用哪个命令？从这里开始。AI 根据你的当前状态（库、阅读进度）展示个性化菜单。
+
+```
+You: /paper
+
+Claude: [调用 paper_workspace_context() + paper_stats()]
+
+        **Paper Agent** — 你的研究助手
+
+        当前状态：库中 2,139 篇论文 | 待读 5 | 阅读中 2 | 已读 8
+
+        你想做什么？
+
+        | # | 功能 | 说明 | 命令 |
+        |---|------|------|------|
+        | 1 | 每日推荐 | 收集今日论文 + 个性化推荐 | `/start-my-day` |
+        | 2 | 搜索论文 | 关键词搜索本地库 | `/paper-search <关键词>` |
+        | 3 | 深度分析 | 单篇论文结构化分析 | `/paper-analyze <ID>` |
+        | 4 | 文献综述 | 一个方向的论文梳理 | `/paper-survey <主题>` |
+        | 5 | 趋势分析 | 研究方向热度和趋势 | `/paper-insight <方向>` |
+        | 6 | 批量筛选 | 自动分流待读论文 | `/paper-triage` |
+        | 7 | 论文对比 | 多篇论文横向对比 | `/paper-compare` |
+        | 8 | 下载 PDF | 下载论文全文 | `/paper-download <ID>` |
+
+        直接告诉我你想做什么，或输入上面的命令。
+
+You: 今天有什么新论文？
+
+Claude: (进入 /start-my-day 流程)
+```
+
+也可以跳过菜单，直接自然语言描述需求——AI 会自动路由到对应功能。
+
+---
 
 ### 1. `/start-my-day` — 每日开工
 
@@ -1411,6 +1465,14 @@ Claude Code 在每个环节：
 
 ## 故障排查
 
+### 首先：运行自检
+
+```bash
+paper-agent doctor
+```
+
+会检查 7 项内容：LLM 配置、MCP 可执行文件、研究方向、论文库、Claude Code 集成（commands + skills）、Cursor 集成、Workspace。每项都会显示 ✅ 或 ❌ 并给出修复建议。
+
 ### MCP 连接失败
 
 ```
@@ -1419,9 +1481,10 @@ Claude: ❌ 无法连接到 paper-agent MCP server
 ```
 
 检查：
-1. `paper-agent-mcp` 是否已安装：`which paper-agent-mcp`
-2. `.mcp.json` 是否存在：`ls .mcp.json`
-3. 重新配置：`paper-agent setup claude-code`
+1. 运行 `paper-agent doctor` 看哪项失败
+2. `paper-agent-mcp` 是否已安装：`which paper-agent-mcp`
+3. `.mcp.json` 是否存在：`ls .mcp.json`
+4. 重新配置：`paper-agent setup claude-code`
 
 ### 论文库为空
 
@@ -1447,6 +1510,8 @@ Claude: LLM 评分失败：API key invalid
 
 | 场景 | CLI（终端） | Claude Code |
 |------|-----------|-------------|
+| 不知道从哪开始 | `paper-agent --help` | `/paper`（智能菜单 + 状态感知） |
+| 安装自检 | `paper-agent doctor` | 同（terminal 运行） |
 | 查论文 | `paper-agent search "query"` | "帮我查 xxx 论文" |
 | 在线搜索 | 不支持 | `paper_search_online`（arXiv + S2 并行） |
 | 每日推荐 | `collect -d 1 && digest`（两步） | `/start-my-day` = `paper_morning_brief`（一次调用完成全部） |

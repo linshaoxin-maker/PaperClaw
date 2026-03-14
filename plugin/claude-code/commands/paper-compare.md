@@ -21,9 +21,17 @@ Compare multiple papers on selected dimensions.
 3. Ask which dimensions to compare:
    - a) 方法架构  b) 实验结果  c) 适用场景  d) 全部
 4. Call `paper_compare(paper_ids, aspects)` to get structured comparison data
-5. Generate a comparison table in Chinese:
-   | 论文 | 方法 | 关键技术 | 主要结果 | 适用场景 |
-6. Provide analysis summary: which approach is best for what scenario
+5. Generate comparison tables in Chinese:
+
+   **方法对比**:
+   | 维度 | 论文A | 论文B | 论文C |
+   |------|-------|-------|-------|
+   | 方法 | ... | ... | ... |
+   | 关键技术 | ... | ... | ... |
+   | 主要结果 | ... | ... | ... |
+   | 适用场景 | ... | ... | ... |
+
+   **结论与建议**: 明确判断哪种方法在什么场景下最优，给出选型建议
 7. Ask: "要保存对比表格吗？或者基于这些写 survey？"
 8. If save requested, write to file
 9. If export requested, call `paper_export(paper_ids, format="bibtex")`

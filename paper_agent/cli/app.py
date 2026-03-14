@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import shutil
+import sys
 from datetime import date
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -488,6 +491,121 @@ def show_config(
 
     if not show_secrets:
         console.print("\n[dim]提示: 使用 --show-secrets 显示完整 API key[/dim]")
+
+
+# ── doctor ──
+
+@app.command()
+def doctor(
+    config_path: Optional[str] = typer.Option(None, "--config", help="Custom config path"),
+) -> None:
+    """Check that paper-agent is fully set up and ready to use."""
+    from rich.table import Table
+
+    checks: list[tuple[str, bool, str]] = []
+    cwd = Path.cwd()
+
+    # 1. Config / init
+    try:
+        from paper_agent.app.config_manager import ConfigManager
+        cm = ConfigManager(config_path)
+        if cm.is_initialized():
+            checks.append(("LLM 配置（paper-agent init）", True, "已初始化"))
+        else:
+            checks.append(("LLM 配置（paper-agent init）", False, "未初始化 → 运行 paper-agent init"))
+    except Exception as e:
+        checks.append(("LLM 配置（paper-agent init）", False, str(e)))
+
+    # 2. MCP binary
+    mcp_bin = shutil.which("paper-agent-mcp")
+    if mcp_bin:
+        checks.append(("MCP 可执行文件", True, mcp_bin))
+    else:
+        venv_bin = Path(sys.executable).parent / "paper-agent-mcp"
+        if venv_bin.exists():
+            checks.append(("MCP 可执行文件", True, str(venv_bin)))
+        else:
+            checks.append(("MCP 可执行文件", True, f"{sys.executable} -m paper_agent.mcp (fallback)"))
+
+    # 3. Profile
+    try:
+        ctx_obj = _get_ctx(config_path)
+        cfg = ctx_obj.require_initialized()
+        if cfg.topics:
+            checks.append(("研究方向（Profile）", True, f"{len(cfg.topics)} topics, {len(cfg.keywords)} keywords"))
+        else:
+            checks.append(("研究方向（Profile）", False, "未配置 → 运行 paper-agent profile create 或 /paper-setup"))
+    except Exception:
+        checks.append(("研究方向（Profile）", False, "需要先完成 init"))
+
+    # 4. Library
+    try:
+        total = ctx_obj.storage.count_papers()
+        if total > 0:
+            checks.append(("论文库", True, f"{total} 篇论文"))
+        else:
+            checks.append(("论文库", False, "空 → 运行 paper-agent collect 或 /start-my-day"))
+    except Exception:
+        checks.append(("论文库", False, "无法连接"))
+
+    # 5. Claude Code config
+    claude_mcp = cwd / ".mcp.json"
+    claude_md = cwd / "CLAUDE.md"
+    claude_cmds = cwd / ".claude" / "commands"
+    claude_skills = cwd / ".claude" / "skills"
+    if claude_mcp.exists() and claude_md.exists():
+        parts = []
+        if claude_cmds.exists():
+            cmd_count = len(list(claude_cmds.glob("*.md")))
+            parts.append(f"{cmd_count} commands")
+        if claude_skills.exists():
+            skill_count = len(list(claude_skills.glob("*/SKILL.md")))
+            parts.append(f"{skill_count} skills")
+        checks.append(("Claude Code 集成", True, ", ".join(parts) if parts else "已配置"))
+    elif claude_mcp.exists():
+        checks.append(("Claude Code 集成", False, "缺少 CLAUDE.md → 重新运行 paper-agent setup claude-code"))
+    else:
+        checks.append(("Claude Code 集成", False, "未配置（当前目录） → 运行 paper-agent setup claude-code"))
+
+    # 6. Cursor config
+    cursor_mcp = cwd / ".cursor" / "mcp.json"
+    cursor_skills = cwd / ".cursor" / "skills"
+    if cursor_mcp.exists():
+        parts = []
+        if cursor_skills.exists():
+            skill_count = len(list(cursor_skills.glob("*/SKILL.md")))
+            parts.append(f"{skill_count} skills")
+        checks.append(("Cursor 集成", True, ", ".join(parts) if parts else "已配置"))
+    else:
+        checks.append(("Cursor 集成", False, "未配置（当前目录） → 运行 paper-agent setup cursor"))
+
+    # 7. Workspace
+    ws_dir = cwd / ".paper-agent"
+    if ws_dir.exists() and (ws_dir / "README.md").exists():
+        checks.append(("Workspace（.paper-agent/）", True, str(ws_dir)))
+    elif ws_dir.exists():
+        checks.append(("Workspace（.paper-agent/）", False, "不完整 → 重新运行 setup"))
+    else:
+        checks.append(("Workspace（.paper-agent/）", False, "未初始化 → 运行 setup 自动创建"))
+
+    table = Table(title="Paper Agent 健康检查")
+    table.add_column("检查项", style="bold")
+    table.add_column("状态", width=4)
+    table.add_column("详情")
+
+    all_ok = True
+    for name, ok, detail in checks:
+        status = "[green]✅[/green]" if ok else "[red]❌[/red]"
+        if not ok:
+            all_ok = False
+        table.add_row(name, status, detail)
+
+    console.print(table)
+
+    if all_ok:
+        console.print("\n[bold green]一切就绪！[/bold green] 可以开始使用了。")
+    else:
+        console.print("\n[yellow]有些项目需要修复。按上面的提示操作即可。[/yellow]")
 
 
 # ── mcp-server ──
