@@ -1,0 +1,662 @@
+"""SQLite-based local storage layer for Paper Agent."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
+
+from paper_agent.domain.models.paper import Paper
+from paper_agent.domain.models.digest import Digest, DigestStats
+from paper_agent.domain.models.collection import CollectionRecord
+
+_SCHEMA_VERSION = 2
+
+_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS papers (
+    id TEXT PRIMARY KEY,
+    canonical_key TEXT UNIQUE,
+    source_name TEXT NOT NULL,
+    source_paper_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    abstract TEXT NOT NULL DEFAULT '',
+    authors_json TEXT NOT NULL DEFAULT '[]',
+    published_at TEXT,
+    url TEXT NOT NULL DEFAULT '',
+    topics_json TEXT NOT NULL DEFAULT '[]',
+    methodology_tags_json TEXT NOT NULL DEFAULT '[]',
+    research_objectives_json TEXT NOT NULL DEFAULT '[]',
+    relevance_score REAL NOT NULL DEFAULT 0.0,
+    relevance_band TEXT NOT NULL DEFAULT '',
+    recommendation_reason TEXT NOT NULL DEFAULT '',
+    lifecycle_state TEXT NOT NULL DEFAULT 'discovered',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    reading_status TEXT DEFAULT NULL,
+    reading_status_at TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS collections (
+    id TEXT PRIMARY KEY,
+    source_name TEXT NOT NULL,
+    trigger_type TEXT NOT NULL DEFAULT 'manual',
+    status TEXT NOT NULL DEFAULT 'running',
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    collected_count INTEGER NOT NULL DEFAULT 0,
+    new_count INTEGER NOT NULL DEFAULT 0,
+    duplicate_count INTEGER NOT NULL DEFAULT 0,
+    error_summary_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS digests (
+    id TEXT PRIMARY KEY,
+    digest_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'generated',
+    summary_json TEXT NOT NULL DEFAULT '{}',
+    high_confidence_refs TEXT NOT NULL DEFAULT '[]',
+    supplemental_refs TEXT NOT NULL DEFAULT '[]',
+    artifact_uri TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS topic_reports (
+    id TEXT PRIMARY KEY,
+    topic_key TEXT NOT NULL,
+    sections_json TEXT NOT NULL DEFAULT '[]',
+    paper_refs TEXT NOT NULL DEFAULT '[]',
+    artifact_uri TEXT,
+    status TEXT NOT NULL DEFAULT 'generated',
+    version_tag TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS surveys (
+    id TEXT PRIMARY KEY,
+    entry_point TEXT NOT NULL,
+    entry_point_type TEXT NOT NULL DEFAULT 'topic',
+    problem_definition TEXT NOT NULL DEFAULT '',
+    method_taxonomy_json TEXT NOT NULL DEFAULT '[]',
+    comparative_analysis_json TEXT,
+    research_gaps_json TEXT NOT NULL DEFAULT '[]',
+    future_directions_json TEXT NOT NULL DEFAULT '[]',
+    sections_json TEXT NOT NULL DEFAULT '[]',
+    paper_refs TEXT NOT NULL DEFAULT '[]',
+    artifact_uri TEXT,
+    status TEXT NOT NULL DEFAULT 'generated',
+    version_tag TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS llm_cache (
+    cache_key TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    task_type TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    response_json TEXT NOT NULL,
+    prompt_version TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    expires_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY
+);
+
+CREATE INDEX IF NOT EXISTS idx_papers_source_published
+    ON papers(source_name, published_at);
+CREATE INDEX IF NOT EXISTS idx_papers_relevance
+    ON papers(relevance_score);
+CREATE INDEX IF NOT EXISTS idx_papers_lifecycle
+    ON papers(lifecycle_state);
+CREATE INDEX IF NOT EXISTS idx_collections_source_started
+    ON collections(source_name, started_at);
+CREATE INDEX IF NOT EXISTS idx_digests_date
+    ON digests(digest_date);
+CREATE INDEX IF NOT EXISTS idx_topic_reports_topic
+    ON topic_reports(topic_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_surveys_entry
+    ON surveys(entry_point_type, created_at);
+CREATE TABLE IF NOT EXISTS paper_notes (
+    id TEXT PRIMARY KEY,
+    paper_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'user',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+CREATE INDEX IF NOT EXISTS idx_paper_notes_paper ON paper_notes(paper_id);
+
+CREATE TABLE IF NOT EXISTS paper_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS paper_group_items (
+    group_id TEXT NOT NULL,
+    paper_id TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (group_id, paper_id),
+    FOREIGN KEY (group_id) REFERENCES paper_groups(id),
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_cache_provider
+    ON llm_cache(provider, model, task_type);
+"""
+
+_V2_MIGRATION_SQL = """
+-- v02: reading status on papers
+ALTER TABLE papers ADD COLUMN reading_status TEXT DEFAULT NULL;
+ALTER TABLE papers ADD COLUMN reading_status_at TEXT DEFAULT NULL;
+
+-- v02: paper notes
+CREATE TABLE IF NOT EXISTS paper_notes (
+    id TEXT PRIMARY KEY,
+    paper_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'user',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+CREATE INDEX IF NOT EXISTS idx_paper_notes_paper ON paper_notes(paper_id);
+
+-- v02: paper groups (user collections, distinct from 'collections' run-log table)
+CREATE TABLE IF NOT EXISTS paper_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS paper_group_items (
+    group_id TEXT NOT NULL,
+    paper_id TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (group_id, paper_id),
+    FOREIGN KEY (group_id) REFERENCES paper_groups(id),
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+"""
+
+_FTS_SQL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
+    title, abstract, topics_json, methodology_tags_json, research_objectives_json,
+    content='papers',
+    content_rowid='rowid'
+);
+"""
+
+_FTS_TRIGGERS = """
+CREATE TRIGGER IF NOT EXISTS papers_ai AFTER INSERT ON papers BEGIN
+    INSERT INTO papers_fts(rowid, title, abstract, topics_json, methodology_tags_json, research_objectives_json)
+    VALUES (new.rowid, new.title, new.abstract, new.topics_json, new.methodology_tags_json, new.research_objectives_json);
+END;
+
+CREATE TRIGGER IF NOT EXISTS papers_ad AFTER DELETE ON papers BEGIN
+    INSERT INTO papers_fts(papers_fts, rowid, title, abstract, topics_json, methodology_tags_json, research_objectives_json)
+    VALUES ('delete', old.rowid, old.title, old.abstract, old.topics_json, old.methodology_tags_json, old.research_objectives_json);
+END;
+
+CREATE TRIGGER IF NOT EXISTS papers_au AFTER UPDATE ON papers BEGIN
+    INSERT INTO papers_fts(papers_fts, rowid, title, abstract, topics_json, methodology_tags_json, research_objectives_json)
+    VALUES ('delete', old.rowid, old.title, old.abstract, old.topics_json, old.methodology_tags_json, old.research_objectives_json);
+    INSERT INTO papers_fts(rowid, title, abstract, topics_json, methodology_tags_json, research_objectives_json)
+    VALUES (new.rowid, new.title, new.abstract, new.topics_json, new.methodology_tags_json, new.research_objectives_json);
+END;
+"""
+
+
+import re
+
+_FTS_SPECIAL = re.compile(r'[:\-\.\(\)\*\^~"\{\}]')
+
+
+def _sanitize_fts_query(query: str) -> str:
+    """Make a user query safe for FTS5 MATCH.
+
+    FTS5 treats hyphens as column-prefix operators (``long-term`` becomes
+    ``long:term``) and other punctuation as syntax.  We quote any token
+    that contains special characters so FTS5 treats it as a literal.
+    """
+    tokens = query.split()
+    safe: list[str] = []
+    for t in tokens:
+        if _FTS_SPECIAL.search(t):
+            # Strip existing quotes, then wrap in double quotes
+            cleaned = t.replace('"', "")
+            if cleaned:
+                safe.append(f'"{cleaned}"')
+        else:
+            safe.append(t)
+    return " ".join(safe) if safe else query
+
+
+def _quote_all_tokens(query: str) -> str:
+    """Last-resort fallback: quote every token individually."""
+    tokens = query.split()
+    return " ".join(f'"{t.replace(chr(34), "")}"' for t in tokens if t.strip())
+
+
+class SQLiteStorage:
+    def __init__(self, db_path: str | Path) -> None:
+        self._db_path = Path(db_path)
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn: sqlite3.Connection | None = None
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            self._conn = sqlite3.connect(str(self._db_path))
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA foreign_keys=ON")
+        return self._conn
+
+    def initialize(self) -> None:
+        cur = self.conn.executescript(_SCHEMA_SQL)
+        cur.close()
+        self.conn.executescript(_FTS_SQL)
+        self.conn.executescript(_FTS_TRIGGERS)
+        existing = self.conn.execute("SELECT version FROM schema_version").fetchone()
+        if not existing:
+            self.conn.execute(
+                "INSERT INTO schema_version (version) VALUES (?)", (_SCHEMA_VERSION,)
+            )
+            self.conn.commit()
+        else:
+            current = existing["version"]
+            if current < 2:
+                self._migrate_to_v2()
+            self.conn.commit()
+
+    def _migrate_to_v2(self) -> None:
+        cols = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(papers)").fetchall()
+        }
+        if "reading_status" not in cols:
+            self.conn.execute(
+                "ALTER TABLE papers ADD COLUMN reading_status TEXT DEFAULT NULL"
+            )
+            self.conn.execute(
+                "ALTER TABLE papers ADD COLUMN reading_status_at TEXT DEFAULT NULL"
+            )
+        for stmt in (
+            """CREATE TABLE IF NOT EXISTS paper_notes (
+                id TEXT PRIMARY KEY, paper_id TEXT NOT NULL,
+                content TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'user',
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                FOREIGN KEY (paper_id) REFERENCES papers(id))""",
+            "CREATE INDEX IF NOT EXISTS idx_paper_notes_paper ON paper_notes(paper_id)",
+            """CREATE TABLE IF NOT EXISTS paper_groups (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS paper_group_items (
+                group_id TEXT NOT NULL, paper_id TEXT NOT NULL,
+                added_at TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (group_id, paper_id),
+                FOREIGN KEY (group_id) REFERENCES paper_groups(id),
+                FOREIGN KEY (paper_id) REFERENCES papers(id))""",
+        ):
+            self.conn.execute(stmt)
+        self.conn.execute(
+            "UPDATE schema_version SET version = ?", (_SCHEMA_VERSION,)
+        )
+
+    def close(self) -> None:
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+
+    # ── Papers ──
+
+    def save_paper(self, paper: Paper) -> None:
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            """INSERT INTO papers
+            (id, canonical_key, source_name, source_paper_id, title, abstract,
+             authors_json, published_at, url, topics_json, methodology_tags_json,
+             research_objectives_json, relevance_score, relevance_band,
+             recommendation_reason, lifecycle_state, metadata_json, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(canonical_key) DO UPDATE SET
+                relevance_score=excluded.relevance_score,
+                relevance_band=excluded.relevance_band,
+                recommendation_reason=excluded.recommendation_reason,
+                topics_json=excluded.topics_json,
+                methodology_tags_json=excluded.methodology_tags_json,
+                research_objectives_json=excluded.research_objectives_json,
+                lifecycle_state=excluded.lifecycle_state,
+                updated_at=excluded.updated_at
+            """,
+            (
+                paper.id,
+                paper.canonical_key,
+                paper.source_name,
+                paper.source_paper_id,
+                paper.title,
+                paper.abstract,
+                json.dumps(paper.authors),
+                paper.published_at.isoformat() if paper.published_at else None,
+                paper.url,
+                json.dumps(paper.topics),
+                json.dumps(paper.methodology_tags),
+                json.dumps(paper.research_objectives),
+                paper.relevance_score,
+                paper.relevance_band,
+                paper.recommendation_reason,
+                paper.lifecycle_state,
+                json.dumps(paper.metadata),
+                now,
+                now,
+            ),
+        )
+        self.conn.commit()
+
+    def save_papers(self, papers: list[Paper]) -> tuple[int, int]:
+        new_count = 0
+        dup_count = 0
+        for p in papers:
+            existing = self.conn.execute(
+                "SELECT id FROM papers WHERE canonical_key = ?", (p.canonical_key,)
+            ).fetchone()
+            if existing:
+                dup_count += 1
+            else:
+                new_count += 1
+            self.save_paper(p)
+        return new_count, dup_count
+
+    def get_paper(self, paper_id: str) -> Paper | None:
+        row = self.conn.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
+        if not row:
+            return None
+        return self._row_to_paper(row)
+
+    def get_paper_by_canonical(self, canonical_key: str) -> Paper | None:
+        row = self.conn.execute(
+            "SELECT * FROM papers WHERE canonical_key = ?", (canonical_key,)
+        ).fetchone()
+        if not row:
+            return None
+        return self._row_to_paper(row)
+
+    def get_papers_by_date(self, since: date, until: date | None = None) -> list[Paper]:
+        if until:
+            rows = self.conn.execute(
+                "SELECT * FROM papers WHERE published_at >= ? AND published_at < ? ORDER BY relevance_score DESC",
+                (since.isoformat(), until.isoformat()),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM papers WHERE published_at >= ? ORDER BY relevance_score DESC",
+                (since.isoformat(),),
+            ).fetchall()
+        return [self._row_to_paper(r) for r in rows]
+
+    def get_filtered_papers(self, min_score: float = 0.0, limit: int = 100) -> list[Paper]:
+        rows = self.conn.execute(
+            "SELECT * FROM papers WHERE relevance_score >= ? ORDER BY relevance_score DESC LIMIT ?",
+            (min_score, limit),
+        ).fetchall()
+        return [self._row_to_paper(r) for r in rows]
+
+    def search_papers(self, query: str, limit: int = 50) -> list[Paper]:
+        sanitized = _sanitize_fts_query(query)
+        try:
+            rows = self.conn.execute(
+                """SELECT p.* FROM papers_fts fts
+                   JOIN papers p ON p.rowid = fts.rowid
+                   WHERE papers_fts MATCH ?
+                   ORDER BY rank
+                   LIMIT ?""",
+                (sanitized, limit),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # Fallback: quote every token so FTS5 treats them all as literals
+            fallback = _quote_all_tokens(query)
+            rows = self.conn.execute(
+                """SELECT p.* FROM papers_fts fts
+                   JOIN papers p ON p.rowid = fts.rowid
+                   WHERE papers_fts MATCH ?
+                   ORDER BY rank
+                   LIMIT ?""",
+                (fallback, limit),
+            ).fetchall()
+        return [self._row_to_paper(r) for r in rows]
+
+    def update_paper_scores(
+        self, paper_id: str, score: float, band: str, reason: str,
+        topics: list[str] | None = None,
+    ) -> None:
+        now = datetime.utcnow().isoformat()
+        if topics is not None:
+            self.conn.execute(
+                """UPDATE papers SET relevance_score=?, relevance_band=?,
+                   recommendation_reason=?, topics_json=?, lifecycle_state='filtered', updated_at=?
+                   WHERE id=?""",
+                (score, band, reason, json.dumps(topics), now, paper_id),
+            )
+        else:
+            self.conn.execute(
+                """UPDATE papers SET relevance_score=?, relevance_band=?,
+                   recommendation_reason=?, lifecycle_state='filtered', updated_at=?
+                   WHERE id=?""",
+                (score, band, reason, now, paper_id),
+            )
+        self.conn.commit()
+
+    def count_papers(self) -> int:
+        row = self.conn.execute("SELECT COUNT(*) as cnt FROM papers").fetchone()
+        return row["cnt"] if row else 0
+
+    def get_all_papers(self, limit: int = 1000) -> list[Paper]:
+        rows = self.conn.execute(
+            "SELECT * FROM papers ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [self._row_to_paper(r) for r in rows]
+
+    # ── Digests ──
+
+    def save_digest(self, digest: Digest) -> None:
+        self.conn.execute(
+            """INSERT OR REPLACE INTO digests
+            (id, digest_date, status, summary_json, high_confidence_refs,
+             supplemental_refs, artifact_uri, created_at)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                digest.id,
+                digest.digest_date.isoformat(),
+                digest.status,
+                json.dumps(digest.stats.__dict__),
+                json.dumps([p.id for p in digest.high_confidence_papers]),
+                json.dumps([p.id for p in digest.supplemental_papers]),
+                digest.artifact_uri,
+                digest.created_at.isoformat(),
+            ),
+        )
+        self.conn.commit()
+
+    def get_latest_digest(self) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM digests ORDER BY digest_date DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            return None
+        return dict(row)
+
+    # ── Collections ──
+
+    def save_collection(self, record: CollectionRecord) -> None:
+        self.conn.execute(
+            """INSERT OR REPLACE INTO collections
+            (id, source_name, trigger_type, status, started_at, finished_at,
+             collected_count, new_count, duplicate_count, error_summary_json)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                record.id,
+                record.source_name,
+                record.trigger_type,
+                record.status,
+                record.started_at.isoformat(),
+                record.finished_at.isoformat() if record.finished_at else None,
+                record.collected_count,
+                record.new_count,
+                record.duplicate_count,
+                json.dumps(record.error_summary) if record.error_summary else None,
+            ),
+        )
+        self.conn.commit()
+
+    # ── Reading Status ──
+
+    def update_reading_status(self, paper_ids: list[str], status: str) -> int:
+        now = datetime.utcnow().isoformat()
+        updated = 0
+        for pid in paper_ids:
+            cur = self.conn.execute(
+                "UPDATE papers SET reading_status=?, reading_status_at=?, updated_at=? WHERE id=?",
+                (status, now, now, pid),
+            )
+            updated += cur.rowcount
+        self.conn.commit()
+        return updated
+
+    def get_reading_stats(self) -> dict[str, int]:
+        rows = self.conn.execute(
+            "SELECT reading_status, COUNT(*) as cnt FROM papers "
+            "WHERE reading_status IS NOT NULL GROUP BY reading_status"
+        ).fetchall()
+        return {row["reading_status"]: row["cnt"] for row in rows}
+
+    def get_papers_by_reading_status(
+        self, status: str | None = None, limit: int = 200
+    ) -> list[Paper]:
+        if status:
+            rows = self.conn.execute(
+                "SELECT * FROM papers WHERE reading_status=? "
+                "ORDER BY reading_status_at DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM papers WHERE reading_status IS NOT NULL "
+                "ORDER BY reading_status_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._row_to_paper(r) for r in rows]
+
+    # ── Paper Notes ──
+
+    def save_note(self, note_id: str, paper_id: str, content: str, source: str = "user") -> None:
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            "INSERT INTO paper_notes (id, paper_id, content, source, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET content=?, updated_at=?",
+            (note_id, paper_id, content, source, now, now, content, now),
+        )
+        self.conn.commit()
+
+    def get_notes(self, paper_id: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM paper_notes WHERE paper_id=? ORDER BY created_at",
+            (paper_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Paper Groups ──
+
+    def create_group(self, group_id: str, name: str, description: str = "") -> None:
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            "INSERT INTO paper_groups (id, name, description, created_at, updated_at) VALUES (?,?,?,?,?)",
+            (group_id, name, description, now, now),
+        )
+        self.conn.commit()
+
+    def get_group(self, name: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM paper_groups WHERE name=?", (name,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_groups(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT g.*, COUNT(gi.paper_id) as paper_count "
+            "FROM paper_groups g LEFT JOIN paper_group_items gi ON g.id=gi.group_id "
+            "GROUP BY g.id ORDER BY g.updated_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_papers_to_group(self, group_id: str, paper_ids: list[str]) -> int:
+        now = datetime.utcnow().isoformat()
+        added = 0
+        for pid in paper_ids:
+            try:
+                self.conn.execute(
+                    "INSERT INTO paper_group_items (group_id, paper_id, added_at) VALUES (?,?,?)",
+                    (group_id, pid, now),
+                )
+                added += 1
+            except sqlite3.IntegrityError:
+                pass
+        if added:
+            self.conn.execute(
+                "UPDATE paper_groups SET updated_at=? WHERE id=?", (now, group_id)
+            )
+        self.conn.commit()
+        return added
+
+    def get_group_papers(self, name: str, limit: int = 200) -> list[Paper]:
+        rows = self.conn.execute(
+            "SELECT p.* FROM papers p "
+            "JOIN paper_group_items gi ON p.id=gi.paper_id "
+            "JOIN paper_groups g ON g.id=gi.group_id "
+            "WHERE g.name=? ORDER BY gi.added_at DESC LIMIT ?",
+            (name, limit),
+        ).fetchall()
+        return [self._row_to_paper(r) for r in rows]
+
+    # ── Internal ──
+
+    def _row_to_paper(self, row: sqlite3.Row) -> Paper:
+        pub = row["published_at"]
+        keys = row.keys()
+        rs = row["reading_status"] if "reading_status" in keys else None
+        rs_at = row["reading_status_at"] if "reading_status_at" in keys else None
+        return Paper(
+            id=row["id"],
+            canonical_key=row["canonical_key"],
+            source_name=row["source_name"],
+            source_paper_id=row["source_paper_id"],
+            title=row["title"],
+            abstract=row["abstract"],
+            authors=json.loads(row["authors_json"]),
+            published_at=datetime.fromisoformat(pub) if pub else None,
+            url=row["url"],
+            topics=json.loads(row["topics_json"]),
+            methodology_tags=json.loads(row["methodology_tags_json"]),
+            research_objectives=json.loads(row["research_objectives_json"]),
+            relevance_score=row["relevance_score"],
+            relevance_band=row["relevance_band"],
+            recommendation_reason=row["recommendation_reason"],
+            lifecycle_state=row["lifecycle_state"],
+            metadata=json.loads(row["metadata_json"]),
+            reading_status=rs,
+            reading_status_at=datetime.fromisoformat(rs_at) if rs_at else None,
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
