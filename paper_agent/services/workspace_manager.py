@@ -50,7 +50,7 @@ class WorkspaceManager:
     DIRS = ("collections", "notes", "citation-traces")
     FILES = ("research-journal.md", "reading-list.md")
 
-    def __init__(self, workspace_dir: Path, storage: SQLiteStorage) -> None:
+    def __init__(self, workspace_dir: Path, storage: SQLiteStorage | None = None) -> None:
         self._root = workspace_dir
         self._storage = storage
 
@@ -107,6 +107,86 @@ class WorkspaceManager:
             idx.write_text(_COLLECTION_INDEX_TEMPLATE, encoding="utf-8")
             created.append("collections/_index.md")
         return created
+
+    def ensure_initialized(self) -> None:
+        """Auto-init if not yet initialized. Called by MCP tools silently."""
+        if not self.is_initialized():
+            self.init()
+
+    # ── Dashboard ──
+
+    def rebuild_dashboard(self) -> None:
+        """Regenerate .paper-agent/README.md as a human-readable dashboard."""
+        if not self.is_initialized():
+            return
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        lines = [
+            "# Research Dashboard\n",
+            f"> Last updated: {now}\n",
+        ]
+
+        if self._storage:
+            stats = self._storage.get_reading_stats()
+            to_read = stats.get("to_read", 0)
+            reading = stats.get("reading", 0)
+            read = stats.get("read", 0)
+            important = stats.get("important", 0)
+            lines.append("## 阅读进度\n")
+            lines.append(
+                f"| 待读 | 阅读中 | 已读 | 重要 |\n"
+                f"|------|--------|------|------|\n"
+                f"| {to_read} | {reading} | {read} | {important} |\n"
+            )
+
+            groups = self._storage.list_groups()
+            lines.append("## 论文分组\n")
+            if groups:
+                for g in groups:
+                    safe = re.sub(r"[^\w\-]", "_", g["name"])
+                    lines.append(
+                        f"- [{g['name']}](collections/{safe}.md) "
+                        f"({g.get('paper_count', 0)} 篇)"
+                    )
+            else:
+                lines.append("(暂无分组)")
+            lines.append("")
+
+        notes_dir = self._root / "notes"
+        if notes_dir.is_dir():
+            note_files = sorted(notes_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
+            lines.append("## 最近笔记\n")
+            if note_files:
+                for f in note_files[:10]:
+                    lines.append(f"- [{f.stem}](notes/{f.name})")
+            else:
+                lines.append("(暂无笔记)")
+            lines.append("")
+
+        traces_dir = self._root / "citation-traces"
+        if traces_dir.is_dir():
+            trace_files = list(traces_dir.glob("*.md"))
+            if trace_files:
+                lines.append("## 引用链追踪\n")
+                for f in trace_files:
+                    lines.append(f"- [{f.stem}](citation-traces/{f.name})")
+                lines.append("")
+
+        journal_path = self._root / "research-journal.md"
+        if journal_path.exists():
+            text = journal_path.read_text(encoding="utf-8")
+            entries = re.findall(r"^### (.+)", text, re.MULTILINE)
+            lines.append("## 最近活动\n")
+            if entries:
+                for e in entries[:8]:
+                    lines.append(f"- {e}")
+            else:
+                lines.append("(暂无活动)")
+            lines.append("")
+
+        lines.append("---\n")
+        lines.append("*此文件由 paper-agent 自动生成，请勿手动编辑。*\n")
+
+        (self._root / "README.md").write_text("\n".join(lines), encoding="utf-8")
 
     # ── Journal ──
 

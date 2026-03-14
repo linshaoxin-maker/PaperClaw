@@ -30,7 +30,7 @@ Tools (v01 — core):
   paper_templates_list  List research area templates
 
 Tools (v02 — workspace layer):
-  paper_workspace_init     Initialize .paper-agent/ workspace
+  paper_workspace_status   Show workspace dashboard (human-readable)
   paper_workspace_context  Get workspace context for session recovery
   paper_reading_status     Set reading status (to_read/reading/read/important)
   paper_reading_stats      Show reading progress statistics
@@ -50,6 +50,7 @@ Tools (v02 — multi-paper intelligence):
   paper_export          Export to BibTeX / markdown / JSON
   paper_download        Download PDFs from arXiv
   paper_search_online   Real-time search via arXiv + S2
+  paper_find_and_download  Find paper by exact title + download PDF
 
 Resources:
   paper://digest/today  Today's digest

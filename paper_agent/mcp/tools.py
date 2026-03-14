@@ -6,7 +6,7 @@ import json
 import re
 import uuid
 from collections import Counter
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +32,17 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         if _ARXIV_ID_RE.match(paper_id):
             return ctx.storage.get_paper_by_canonical(f"arxiv:{paper_id}")
         return None
+
+    def _title_match(query: str, candidate: str) -> bool:
+        """Fuzzy title match — case-insensitive, ignores punctuation."""
+        def _norm(s: str) -> str:
+            return re.sub(r"[^a-z0-9 ]", "", s.lower()).strip()
+        q, c = _norm(query), _norm(candidate)
+        if not q or not c:
+            return False
+        if q == c:
+            return True
+        return q in c or c in q
 
     def _resolve_papers(paper_ids: list[str]) -> tuple[list[Paper], list[str]]:
         """Resolve multiple paper IDs. Returns (found, not_found_ids)."""
@@ -389,23 +400,25 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
 
     # ── v02 Workspace Tools ────────────────────────────────────────────
 
+    def _ensure_workspace() -> None:
+        """Silently auto-init workspace if not present."""
+        ctx.workspace_manager.ensure_initialized()
+
     @mcp.tool()
-    def paper_workspace_init(workspace_dir: str | None = None) -> str:
-        """Initialize the .paper-agent/ workspace directory.
+    def paper_workspace_status() -> str:
+        """Show a human-readable workspace dashboard.
 
-        Creates the workspace directory with template files for research
-        journal, reading list, collections, notes, and citation traces.
-        Safe to call multiple times — repairs missing files if needed.
-
-        Args:
-            workspace_dir: Custom workspace path. Default: .paper-agent/ in project root.
+        Returns the current state of the researcher's workspace:
+        reading progress, paper groups, recent notes, citation traces,
+        and recent activity. Use this to give the user an overview.
 
         Returns:
-            JSON object with status and list of created files.
+            JSON object with workspace status formatted for display.
         """
-        if workspace_dir:
-            ctx.workspace_manager._root = Path(workspace_dir)
-        result = ctx.workspace_manager.init()
+        _ensure_workspace()
+        ctx.workspace_manager.rebuild_dashboard()
+        result = ctx.workspace_manager.get_context()
+        result["dashboard_file"] = str(ctx.workspace_manager.root / "README.md")
         return json.dumps(result, ensure_ascii=False, default=str)
 
     @mcp.tool()
@@ -419,6 +432,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         Returns:
             JSON object with journal, reading stats, collections, traces.
         """
+        _ensure_workspace()
         result = ctx.workspace_manager.get_context()
         return json.dumps(result, ensure_ascii=False, default=str)
 
@@ -433,6 +447,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         Returns:
             JSON object with update count and reading stats.
         """
+        _ensure_workspace()
         valid = {"to_read", "reading", "read", "important"}
         if status not in valid:
             return json.dumps({"error": f"Invalid status '{status}'. Use: {sorted(valid)}"})
@@ -496,6 +511,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         Returns:
             JSON object with note ID and file path.
         """
+        _ensure_workspace()
         paper = _resolve_paper(paper_id)
         if not paper:
             return json.dumps({"error": f"Paper not found: {paper_id}"})
@@ -546,6 +562,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         Returns:
             JSON object with group ID and file path.
         """
+        _ensure_workspace()
         existing = ctx.storage.get_group(name)
         if existing:
             return json.dumps({"error": f"Group '{name}' already exists.", "id": existing["id"]})
@@ -575,6 +592,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         Returns:
             JSON object with add count and group total.
         """
+        _ensure_workspace()
         group = ctx.storage.get_group(name)
         if not group:
             return json.dumps({"error": f"Group '{name}' not found. Create it first with paper_group_create."})
@@ -1106,4 +1124,172 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         }
         if errors:
             result["errors"] = errors
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_find_and_download(
+        title: str,
+        output_dir: str = "papers",
+        save_to_library: bool = True,
+    ) -> str:
+        """Find a paper by its exact title, save it to the library, and download the PDF.
+
+        Searches multiple sources (Semantic Scholar, arXiv) to locate the paper
+        by title. This is the go-to tool when the user provides a specific
+        paper title and wants you to fetch it.
+
+        The tool:
+        1. Searches Semantic Scholar by exact title for broad coverage
+        2. Falls back to arXiv title search if S2 misses
+        3. Saves the paper to the local library
+        4. Downloads the PDF (arXiv or open-access URL)
+
+        Args:
+            title: Exact or near-exact paper title, e.g. "Attention Is All You Need".
+            output_dir: Directory to save the PDF (default: 'papers').
+            save_to_library: Whether to save to local library (default True).
+
+        Returns:
+            JSON object with paper metadata and download result.
+        """
+        import httpx as _httpx
+        from paper_agent.domain.models.paper import Paper
+
+        result: dict[str, Any] = {"title_query": title}
+
+        paper_obj: Paper | None = None
+        pdf_url: str | None = None
+
+        # --- Strategy 1: Semantic Scholar title search ---
+        try:
+            client = _httpx.Client(timeout=30.0, follow_redirects=True, trust_env=True)
+            s2_url = "https://api.semanticscholar.org/graph/v1/paper/search"
+            resp = client.get(
+                s2_url,
+                params={
+                    "query": title,
+                    "limit": 5,
+                    "fields": "paperId,externalIds,title,authors,abstract,year,url,openAccessPdf,venue",
+                },
+            )
+            client.close()
+
+            if resp.status_code == 200:
+                data = resp.json()
+                for hit in data.get("data", []):
+                    hit_title = (hit.get("title") or "").strip()
+                    if _title_match(title, hit_title):
+                        ext_ids = hit.get("externalIds") or {}
+                        arxiv_id = ext_ids.get("ArXiv")
+                        doi = ext_ids.get("DOI")
+
+                        authors = [a.get("name", "") for a in (hit.get("authors") or [])]
+                        year = hit.get("year")
+
+                        paper_obj = Paper(
+                            id="",
+                            canonical_key=f"arxiv:{arxiv_id}" if arxiv_id else f"s2:{hit['paperId']}",
+                            source="semantic_scholar",
+                            source_paper_id=arxiv_id or hit["paperId"],
+                            title=hit_title,
+                            authors=authors,
+                            abstract=hit.get("abstract") or "",
+                            url=hit.get("url") or "",
+                            published_at=datetime(year, 1, 1) if year else None,
+                        )
+
+                        if arxiv_id:
+                            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                        oa = hit.get("openAccessPdf")
+                        if oa and oa.get("url"):
+                            pdf_url = pdf_url or oa["url"]
+
+                        result["matched_via"] = "semantic_scholar"
+                        break
+        except Exception as exc:
+            result["s2_error"] = str(exc)
+
+        # --- Strategy 2: arXiv title search ---
+        if paper_obj is None:
+            try:
+                from paper_agent.infra.sources.arxiv_adapter import (
+                    ARXIV_API_URL,
+                    ArxivAdapter,
+                )
+
+                adapter = ArxivAdapter()
+                encoded = title.replace(" ", "+")
+                url = (
+                    f"{ARXIV_API_URL}?search_query=ti:%22{encoded}%22"
+                    f"&start=0&max_results=5&sortBy=relevance"
+                )
+                client = _httpx.Client(timeout=30.0, follow_redirects=True, trust_env=True)
+                resp = client.get(url)
+                client.close()
+
+                if resp.status_code == 200:
+                    papers = adapter._parse_response(resp.text)
+                    for p in papers:
+                        if _title_match(title, p.title):
+                            paper_obj = p
+                            arxiv_id = p.source_paper_id
+                            if arxiv_id:
+                                pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                            result["matched_via"] = "arxiv"
+                            break
+            except Exception as exc:
+                result["arxiv_error"] = str(exc)
+
+        if paper_obj is None:
+            result["status"] = "not_found"
+            result["message"] = (
+                "Could not find an exact match. Try paper_search_online with keywords."
+            )
+            return json.dumps(result, ensure_ascii=False, default=str)
+
+        # --- Save to library ---
+        if save_to_library:
+            new_count, _ = ctx.storage.save_papers([paper_obj])
+            saved = ctx.storage.get_paper_by_canonical(paper_obj.canonical_key)
+            if saved:
+                paper_obj = saved
+            result["saved_to_library"] = new_count > 0
+
+        result["paper"] = paper_obj.to_detail_dict()
+
+        # --- Download PDF ---
+        if pdf_url:
+            out = Path(output_dir)
+            out.mkdir(parents=True, exist_ok=True)
+
+            safe_name = re.sub(r"[^\w\s-]", "", paper_obj.title)[:80].strip().replace(" ", "_")
+            src_id = paper_obj.source_paper_id or paper_obj.id
+            filename = f"{src_id}_{safe_name}.pdf"
+            filepath = out / filename
+
+            if filepath.exists():
+                result["download"] = {"status": "exists", "path": str(filepath)}
+            else:
+                try:
+                    client = _httpx.Client(timeout=60.0, follow_redirects=True, trust_env=True)
+                    resp = client.get(pdf_url)
+                    client.close()
+                    if resp.status_code == 200 and len(resp.content) > 1000:
+                        filepath.write_bytes(resp.content)
+                        result["download"] = {"status": "downloaded", "path": str(filepath)}
+                    else:
+                        result["download"] = {
+                            "status": "failed",
+                            "reason": f"HTTP {resp.status_code}, size={len(resp.content)}",
+                            "url": pdf_url,
+                        }
+                except Exception as exc:
+                    result["download"] = {"status": "failed", "reason": str(exc), "url": pdf_url}
+        else:
+            result["download"] = {
+                "status": "no_pdf_url",
+                "message": "No arXiv or open-access PDF URL found.",
+            }
+
+        result["status"] = "ok"
         return json.dumps(result, ensure_ascii=False, default=str)

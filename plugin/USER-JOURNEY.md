@@ -170,27 +170,11 @@ Claude: [调用 paper_collect(days=7)]
 
         要看看今天的推荐吗？输入 /start-my-day 或者直接告诉我。
 
-        💡 **提示**: 初始化 Workspace 后，你的阅读进度、笔记、论文分组
-        都会以 markdown 文件的形式保存在 `.paper-agent/` 目录，打开文件夹就能看到。
+        💡 **提示**: `paper-agent setup` 已经自动初始化了 Workspace，
+        你的阅读进度、笔记、论文分组都以 markdown 文件的形式保存在 `.paper-agent/` 目录。
+        打开文件夹就能看到，`.paper-agent/README.md` 是自动更新的仪表盘。
 
-You: 先初始化一下 workspace
-
-Claude: [调用 paper_workspace_init()]
-
-        ✅ Workspace 初始化完成！
-
-        创建了以下文件：
-        ```
-        .paper-agent/
-        ├── research-journal.md     ← 研究日志（AI 的记忆）
-        ├── reading-list.md         ← 阅读队列
-        ├── collections/            ← 论文分组
-        │   └── _index.md
-        ├── notes/                  ← 论文笔记
-        └── citation-traces/        ← 引用链记录
-        ```
-
-        之后每次操作都会自动更新这些文件。看看推荐吗？
+        看看推荐吗？
 
 You: 看看
 
@@ -964,10 +948,90 @@ Claude: [调用 paper_download(paper_ids=[15 篇 IDs])]
 
 ---
 
+### 9. 精确查找 + 下载（给论文标题，全自动）
+
+当你知道论文标题但不知道 arXiv ID 时，可以直接给标题让 AI 找并下载。
+
+```
+You: 帮我找一下 "Attention Is All You Need" 这篇论文，下载 PDF
+
+Claude: [调用 paper_find_and_download(title="Attention Is All You Need")]
+
+        ✅ 找到了！
+
+        **Attention Is All You Need**
+        - Authors: Ashish Vaswani, Noam Shazeer, et al.
+        - Source: Semantic Scholar → arXiv:1706.03762
+        - 已保存到本地库
+
+        📥 PDF 已下载：papers/1706.03762_Attention_Is_All_You_Need.pdf (1.2 MB)
+
+        要深入分析这篇吗？
+
+You: 帮我找 "DREAMPlace: Deep Learning Toolkit-Enabled GPU Acceleration for Modern VLSI Placement"
+
+Claude: [调用 paper_find_and_download(
+            title="DREAMPlace: Deep Learning Toolkit-Enabled GPU Acceleration for Modern VLSI Placement"
+        )]
+
+        ✅ 找到了！
+
+        **DREAMPlace: Deep Learning Toolkit-Enabled GPU Acceleration for Modern VLSI Placement**
+        - Authors: Yibo Lin, Shounak Dhar, et al.
+        - Source: Semantic Scholar → arXiv:1903.00578
+        - 已保存到本地库
+
+        📥 PDF 已下载：papers/1903.00578_DREAMPlace_Deep_Learning_ToolkitEnabled_.pdf
+
+        💡 这篇是你 EDA placement 方向的核心论文。
+        要分析它的引用链吗？可以用 /paper-citations 追踪后续工作。
+```
+
+> 查找策略：先搜 Semantic Scholar（覆盖会议+期刊+预印本），再 fallback 到 arXiv 标题搜索。
+> 只要有 arXiv ID 或 open-access URL，就自动下载 PDF。
+
+---
+
 ## Workspace 功能
 
 v02 引入 **Workspace Layer**——`.paper-agent/` 目录下的一组 markdown 文件，
 作为你和 AI 之间的"共享工作记忆"。所有操作自动记录，打开文件夹就能看到全貌。
+
+> Workspace 由 `paper-agent setup` 命令自动创建，MCP 工具也会在需要时静默自动初始化。
+> `.paper-agent/README.md` 是自动更新的仪表盘。
+
+### Workspace 仪表盘
+
+```
+You: 看看我的研究全貌
+
+Claude: [调用 paper_workspace_status()]
+
+        📊 **Research Dashboard**
+
+        **阅读进度**
+        | 待读 | 阅读中 | 已读 | 重要 |
+        |------|--------|------|------|
+        | 8    | 2      | 9    | 3    |
+
+        **论文分组** (3 个)
+        - rl-placement-papers (12 篇)
+        - transformer-eda (5 篇)
+        - survey-references (15 篇)
+
+        **最近笔记** (3 篇)
+        - RL-Placer_Deep_RL
+        - ChipFormer_Analysis
+        - GNN-Driven_Routing
+
+        **最近活动**
+        - 2026-03-13 | 标记 3 篇论文为 to_read
+        - 2026-03-13 | 添加笔记: RL-Placer: Deep RL...
+        - 2026-03-12 | 创建分组: rl-placement-papers
+
+        仪表盘已更新 → `.paper-agent/README.md`
+        你也可以直接打开这个文件查看。
+```
 
 ### 阅读状态管理
 
@@ -1260,6 +1324,9 @@ Claude: [调用 paper_search_online("LoRA fine-tuning EDA circuit design")]
 17:00  "帮我把 survey 里的 15 篇 PDF 全下载了"
        → paper_download(15 篇 IDs) → papers/ 目录
 
+17:15  "帮我找一下 DREAMPlace 那篇论文，下载一下"
+       → paper_find_and_download("DREAMPlace...") → 入库 + PDF
+
 -- 次日 --
 
 08:00  /start-my-day
@@ -1353,6 +1420,7 @@ Claude: LLM 评分失败：API key invalid
 | 批量搜索 | 不支持 | `paper_search_batch`（N 个方向一次搞定） |
 | 写综述 | 不支持 | `/paper-survey`（全流程引导） |
 | 批量下载 | 不支持 | `/paper-download`（一次传多个 ID） |
+| 按标题找论文 | 不支持 | 直接给标题，AI 自动从 S2 + arXiv 多源查找 + 下载 |
 | 上下文 | 需要在终端和 IDE 间切换 | AI 知道你在写什么代码 |
 | 研究全貌 | 只能通过命令查 | 打开 `.paper-agent/` 目录即见 |
 | 语言 | 英文命令 + 英文输出 | 自然语言输入 + 中文输出 |

@@ -58,6 +58,21 @@ def _merge_mcp_json(path: Path, cmd: str, args: list[str]) -> None:
     path.write_text(json.dumps(existing, indent=2, ensure_ascii=False) + "\n")
 
 
+def _init_workspace(target: Path) -> None:
+    """Create .paper-agent/ workspace directory in the project."""
+    from paper_agent.services.workspace_manager import WorkspaceManager
+
+    ws_dir = target / ".paper-agent"
+    ws = WorkspaceManager(ws_dir, storage=None)  # type: ignore[arg-type]
+    result = ws.init()
+    if result["status"] == "initialized":
+        print_success(f"Workspace → {ws_dir}")
+    elif result["status"] == "repaired":
+        print_success(f"Workspace → {ws_dir} (补全了缺失文件)")
+    else:
+        console.print(f"  [dim]Workspace 已存在 → {ws_dir}[/dim]")
+
+
 # ── Cursor ────────────────────────────────────────────────────────
 
 
@@ -109,6 +124,8 @@ def _setup_cursor_project(target: Path, cmd: str, args: list[str]) -> None:
     rule_dir.mkdir(parents=True, exist_ok=True)
     (rule_dir / "paper-agent.mdc").write_text(_CURSOR_RULE)
     print_success(f"Rule  → {rule_dir / 'paper-agent.mdc'}")
+
+    _init_workspace(target)
 
 
 def _setup_cursor_global(cmd: str, args: list[str]) -> None:
@@ -183,6 +200,8 @@ def _setup_claude_project(target: Path, cmd: str, args: list[str]) -> None:
         print_success(f"CLAUDE.md → {claude_md}")
     else:
         console.print(f"  [dim]CLAUDE.md 已存在，跳过[/dim]")
+
+    _init_workspace(target)
 
     console.print("\n[bold]下一步：[/bold]")
     console.print(f"  1. 在 [cyan]{target}[/cyan] 目录运行 [cyan]claude[/cyan]")

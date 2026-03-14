@@ -2,7 +2,7 @@
 
 **Phase:** Phase 3 (技术设计)
 **Status:** Draft
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-14
 
 ---
 
@@ -19,8 +19,10 @@ paper_agent/
 │   └── paper.py                ← MOD: 新增 reading_status 字段
 ├── infra/storage/
 │   └── sqlite_storage.py       ← MOD: 新增表 + 查询方法
+├── cli/commands/
+│   └── setup.py                ← MOD: 新增 workspace init
 └── mcp/
-    └── tools.py                ← MOD: 新增 8 个 MCP 工具
+    └── tools.py                ← MOD: 新增 12 个 MCP 工具
 ```
 
 ### 1.2 组件依赖
@@ -43,12 +45,16 @@ MCP Tools ─→ WorkspaceManager ─→ SQLiteStorage
 class WorkspaceManager:
     """管理 .paper-agent/ 目录下所有 Workspace 文件。"""
 
-    def __init__(self, workspace_dir: Path, storage: SQLiteStorage):
+    def __init__(self, workspace_dir: Path, storage: SQLiteStorage | None = None):
         ...
 
     # --- 初始化 ---
     def init(self) -> dict                           # 创建目录+模板
     def is_initialized(self) -> bool                 # 检查是否已初始化
+    def ensure_initialized(self) -> None             # MCP 工具静默自动初始化
+
+    # --- Dashboard ---
+    def rebuild_dashboard(self) -> None               # 重新生成 .paper-agent/README.md 仪表盘
 
     # --- Journal ---
     def append_journal(self, summary: str, details: dict) -> None
@@ -160,17 +166,21 @@ CREATE TABLE IF NOT EXISTS paper_group_items (
 
 | 工具 | 输入 | 输出 | 副作用 |
 |------|------|------|--------|
-| `paper_workspace_init` | `workspace_dir?` | `{status, path, files}` | 创建 .paper-agent/ |
-| `paper_workspace_context` | — | `{journal, reading, collections}` | 无 |
+| `paper_workspace_status` | — | `{dashboard, stats, groups}` | 更新 .paper-agent/README.md 仪表盘 |
+| `paper_workspace_context` | — | `{journal, reading, collections}` | 无（静默自动初始化 workspace） |
 | `paper_reading_status` | `paper_ids[], status` | `{updated, summary}` | 更新 DB + reading-list.md + journal |
 | `paper_reading_stats` | — | `{to_read, reading, read, important}` | 无 |
 | `paper_note_add` | `paper_id, content, source?` | `{note_id, file}` | 插入 DB + notes/{id}.md + journal |
 | `paper_note_show` | `paper_id` | `{notes[]}` | 无 |
-| `paper_collection_create` | `name, description?` | `{id, file}` | 插入 DB + collections/{name}.md + journal |
-| `paper_collection_add` | `name, paper_ids[]` | `{added, total}` | 插入 DB + 更新文件 + journal |
-| `paper_collection_show` | `name` | `{papers[], description}` | 无 |
-| `paper_collection_list` | — | `{collections[]}` | 无 |
+| `paper_group_create` | `name, description?` | `{id, file}` | 插入 DB + collections/{name}.md + journal |
+| `paper_group_add` | `name, paper_ids[]` | `{added, total}` | 插入 DB + 更新文件 + journal |
+| `paper_group_show` | `name` | `{papers[], description}` | 无 |
+| `paper_group_list` | — | `{groups[]}` | 无 |
 | `paper_citations` | `paper_id, direction?, limit?, trace_name?` | `{refs[], cites[]}` | S2 API + 入库 + citation-traces/ + journal |
+| `paper_find_and_download` | `title, output_dir?` | `{paper, download}` | S2/arXiv 多源查找 → 入库 → 下载 PDF |
+
+> **Workspace 初始化方式**：由 `paper-agent setup cursor/claude-code` CLI 命令创建 `.paper-agent/`。
+> MCP 工具在 workspace 不存在时静默自动初始化（`_ensure_workspace()`）。
 
 ---
 
@@ -181,7 +191,7 @@ CREATE TABLE IF NOT EXISTS paper_group_items (
 | `sqlite_storage.py` | 修改 | 新增 Schema 迁移 + 6 个新查询方法 |
 | `paper.py` | 修改 | 新增 `reading_status` 和 `reading_status_at` 字段 |
 | `context.py` | 修改 | 注入 WorkspaceManager 和 CitationService |
-| `tools.py` | 修改 | 新增 11 个 MCP 工具 |
+| `tools.py` | 修改 | 新增 12 个 MCP 工具（含 paper_find_and_download） |
 | `server.py` | 修改 | 更新 _DESCRIPTION |
+| `setup.py` | 修改 | setup cursor/claude-code 自动创建 .paper-agent/ |
 | 已有 MCP 工具 | 不变 | 全部向后兼容 |
-| CLI 命令 | 不变（v02 先通过 MCP 提供新能力） | — |

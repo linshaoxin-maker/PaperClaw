@@ -2,7 +2,7 @@
 
 **Phase:** Phase 1 (需求定义)
 **Status:** Draft
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-14
 **Baseline:** `../v01/requirements/requirement-doc.md`
 
 ---
@@ -37,7 +37,8 @@
 
 | FR-ID | 需求 | Priority | 依赖 |
 |-------|------|----------|------|
-| FR-W-01 | **Workspace 初始化**：`paper_workspace_init` 创建 `.paper-agent/` 目录及模板文件 | Must | — |
+| FR-W-01 | **Workspace 初始化**：`paper-agent setup cursor/claude-code` 创建 `.paper-agent/` 目录及模板文件；MCP 工具在 workspace 不存在时静默 auto-init | Must | — |
+| FR-W-06 | **Workspace 仪表盘**：MCP 工具 `paper_workspace_status` 展示人可读摘要，自动更新 `.paper-agent/README.md` | Should | FR-W-01 |
 | FR-W-02 | **研究日志自动记录**：每次 MCP 工具调用后，自动追加 journal 条目（时间 + 操作 + 结果摘要） | Must | FR-W-01 |
 | FR-W-03 | **Journal 裁剪**：journal 超过 50 条时，自动将旧条目归档到 `research-journal-archive.md` | Should | FR-W-02 |
 | FR-W-04 | **Workspace 重建**：从数据库重建所有 Workspace 文件（容灾） | Should | FR-W-01 |
@@ -57,7 +58,7 @@
 
 | FR-ID | 需求 | Priority | 依赖 |
 |-------|------|----------|------|
-| FR-N-01 | **笔记表**：数据库新增 `notes` 表（`id`, `paper_id`, `content`, `created_at`, `updated_at`） | Must | — |
+| FR-N-01 | **笔记表**：数据库新增 `paper_notes` 表（`id`, `paper_id`, `content`, `source`, `created_at`, `updated_at`） | Must | — |
 | FR-N-02 | **添加笔记工具**：MCP 工具 `paper_note_add(paper_id, content)` | Must | FR-N-01 |
 | FR-N-03 | **查看笔记工具**：MCP 工具 `paper_note_show(paper_id)` 返回论文的所有笔记 | Must | FR-N-01 |
 | FR-N-04 | **笔记文件同步**：添加笔记时自动创建/更新 `notes/{paper_id}.md` | Must | FR-W-01, FR-N-02 |
@@ -67,14 +68,14 @@
 
 | FR-ID | 需求 | Priority | 依赖 |
 |-------|------|----------|------|
-| FR-C-01 | **集合表**：数据库新增 `collections` 表（`id`, `name`, `description`, `created_at`）和 `collection_papers` 关联表 | Must | — |
-| FR-C-02 | **创建集合**：MCP 工具 `paper_collection_create(name, description)` | Must | FR-C-01 |
-| FR-C-03 | **添加到集合**：MCP 工具 `paper_collection_add(collection_name, paper_ids)` | Must | FR-C-01 |
-| FR-C-04 | **查看集合**：MCP 工具 `paper_collection_show(collection_name)` 返回集合内论文列表 | Must | FR-C-01 |
-| FR-C-05 | **列出所有集合**：MCP 工具 `paper_collection_list()` | Must | FR-C-01 |
-| FR-C-06 | **集合文件同步**：集合变更时自动更新 `collections/{name}.md` 和 `collections/_index.md` | Must | FR-W-01, FR-C-02 |
-| FR-C-07 | **从集合移除**：MCP 工具 `paper_collection_remove(collection_name, paper_ids)` | Should | FR-C-01 |
-| FR-C-08 | **删除集合**：MCP 工具 `paper_collection_delete(collection_name)` | Should | FR-C-01 |
+| FR-C-01 | **分组表**：数据库新增 `paper_groups` 表（`id`, `name`, `description`, `created_at`）和 `paper_group_items` 关联表（注意：已有 `collections` 表是采集记录，避免冲突） | Must | — |
+| FR-C-02 | **创建分组**：MCP 工具 `paper_group_create(name, description)` | Must | FR-C-01 |
+| FR-C-03 | **添加到分组**：MCP 工具 `paper_group_add(name, paper_ids)` | Must | FR-C-01 |
+| FR-C-04 | **查看分组**：MCP 工具 `paper_group_show(name)` 返回分组内论文列表 | Must | FR-C-01 |
+| FR-C-05 | **列出所有分组**：MCP 工具 `paper_group_list()` | Must | FR-C-01 |
+| FR-C-06 | **分组文件同步**：分组变更时自动更新 `collections/{name}.md` 和 `collections/_index.md` | Must | FR-W-01, FR-C-02 |
+| FR-C-07 | **从分组移除**：MCP 工具 `paper_group_remove(name, paper_ids)` | Should | FR-C-01 |
+| FR-C-08 | **删除分组**：MCP 工具 `paper_group_delete(name)` | Should | FR-C-01 |
 
 ### 2.5 引用链追踪
 
@@ -86,7 +87,16 @@
 | FR-CT-04 | **引用深度控制**：支持指定追踪深度（默认 1 层，最大 2 层） | Should | FR-CT-01 |
 | FR-CT-05 | **引用统计**：返回被引用次数、引用分布（按年份） | Could | FR-CT-01 |
 
-### 2.6 上下文恢复
+### 2.6 精确查找 + 下载
+
+| FR-ID | 需求 | Priority | 依赖 |
+|-------|------|----------|------|
+| FR-F-01 | **按标题查找**：MCP 工具 `paper_find_and_download(title)` 按标题在 Semantic Scholar + arXiv 多源查找论文 | Must | — |
+| FR-F-02 | **自动入库**：找到的论文自动保存到本地库 | Must | FR-F-01 |
+| FR-F-03 | **自动下载 PDF**：优先 arXiv PDF，其次 open-access URL | Must | FR-F-01 |
+| FR-F-04 | **模糊标题匹配**：忽略大小写和标点进行标题匹配 | Should | FR-F-01 |
+
+### 2.7 上下文恢复
 
 | FR-ID | 需求 | Priority | 依赖 |
 |-------|------|----------|------|
@@ -103,8 +113,8 @@
 |------|------|
 | 参与者 | 研究员 |
 | 前置条件 | paper-agent 已安装，config 已初始化 |
-| 主流程 | 1. 研究员运行 workspace init  2. 系统创建 `.paper-agent/` 目录及模板文件  3. 系统确认创建成功 |
-| 扩展流程 | 1a. 目录已存在 → 提示已初始化，询问是否重建 |
+| 主流程 | 1. 研究员运行 `paper-agent setup cursor/claude-code`  2. 系统创建 IDE 配置 + `.paper-agent/` 目录及模板文件  3. 系统确认创建成功 |
+| 扩展流程 | 1a. 目录已存在 → 提示已初始化，跳过  1b. 未运行 setup，MCP 工具首次调用时静默 auto-init |
 | 后置条件 | `.paper-agent/` 目录存在，含 journal、reading-list、collections/_index |
 
 ### UC-V2-02: 管理阅读状态
@@ -205,4 +215,5 @@
 | 研究员想把论文分组管理 | UC-V2-04 | FR-C-01~08 | NFR-V2-01 |
 | 研究员想追踪引用链发现更多论文 | UC-V2-05 | FR-CT-01~05 | NFR-V2-02 |
 | AI 想知道用户上次在干什么 | UC-V2-06 | FR-X-01~02, FR-W-02~03 | NFR-V2-03, UX-V2-03 |
-| 研究员想从零开始初始化工作台 | UC-V2-01 | FR-W-01~05 | NFR-V2-06~07 |
+| 研究员想从零开始初始化工作台 | UC-V2-01 | FR-W-01~06 | NFR-V2-06~07 |
+| 研究员给一个论文标题让 AI 找到并下载 | UC-V2-07 | FR-F-01~04 | NFR-V2-02 |

@@ -21,7 +21,15 @@ docs/
 │   └── adr/
 │       ├── ADR-001-mcp-as-ide-integration.md
 │       ├── ADR-002-sqlite-local-first.md
-│       └── ADR-003-interaction-layer-division.md
+│       ├── ADR-003-interaction-layer-division.md
+│       └── ADR-004-workspace-layer.md
+│
+├── v02/                                     ← 版本级文档 (Workspace Layer)
+│   ├── requirements/requirement-doc.md
+│   ├── spec/functional-spec.md
+│   ├── architecture/design-doc.md
+│   ├── features/feature-list.md
+│   └── journeys/user-journey.md
 │
 └── v01/                                     ← 版本级文档 (v01 + v01_source 合并)
     ├── README.md                            ← 版本概览
@@ -102,9 +110,36 @@ docs/
 | Phase 3 技术设计 | `v01/architecture/design-doc.md`, `architecture/adr/` | ✅ 完成 (契约待补) |
 | Phase 4 特性拆解 | `v01/features/feature-list.md` | ⚠️ 格式待对齐 |
 | Phase 5 MVP 交付 | `v01/mvp/mvp-scope.md`, `paper_agent/` 代码 | ✅ 已实现 |
+| **v02 — Workspace Layer** | | |
+| Phase 0 用户旅程 | `v02/journeys/user-journey.md` | ✅ 完成 |
+| Phase 1 需求定义 | `v02/requirements/requirement-doc.md` | ✅ 完成 |
+| Phase 2 功能规格 | `v02/spec/functional-spec.md` | ✅ 完成 |
+| Phase 3 技术设计 | `v02/architecture/design-doc.md`, `architecture/adr/ADR-004` | ✅ 完成 |
+| Phase 4 特性拆解 | `v02/features/feature-list.md` | ✅ 完成 |
+| Phase 5 实现 | `paper_agent/` 代码 | ✅ 已实现 |
 
 ## 版本说明
 
 - **v01/** — 基础版本 + 多源扩展（原 `v01_source` 已合并）
   - 基础文件：`requirement-doc.md`, `functional-spec.md`, `design-doc.md` 等
   - 多源扩展：带 `-source` 后缀的文件（`requirement-doc-source.md` 等）
+
+- **v02/** — Workspace Layer + 精确查找
+  - 引入 `.paper-agent/` Workspace 目录（阅读管理、笔记、分组、引用链、仪表盘）
+  - 新增 `paper_find_and_download` 按标题多源精确查找 + 下载
+  - 新增 `paper_workspace_status` 人可读仪表盘
+  - Workspace 初始化由 `paper-agent setup` CLI 自动完成，MCP 工具静默 auto-init
+
+```
+docs/v02/
+├── requirements/
+│   └── requirement-doc.md        ← Phase 1: v02 需求
+├── spec/
+│   └── functional-spec.md        ← Phase 2: v02 功能规格
+├── architecture/
+│   └── design-doc.md             ← Phase 3: v02 技术设计
+├── features/
+│   └── feature-list.md           ← Phase 4: v02 特性清单
+└── journeys/
+    └── user-journey.md           ← Phase 0: v02 用户旅程
+```

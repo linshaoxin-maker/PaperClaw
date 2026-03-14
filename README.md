@@ -255,6 +255,12 @@ paper-agent setup claude-code --scope global
 - `/paper-compare` → 多篇论文方法/结果对比
 - `/paper-survey AI for EDA` → 生成文献综述
 - `/paper-download 2301.12345` → 下载 PDF
+- "帮我找 Attention Is All You Need 这篇" → 按标题精确查找 + 下载
+
+**Workspace（v02）：**
+- 运行 setup 后自动创建 `.paper-agent/` 目录
+- 阅读进度、笔记、分组以 markdown 文件沉淀，打开文件夹就能看到
+- `.paper-agent/README.md` 是自动更新的研究仪表盘
 
 或直接自然语言："帮我找 RAG 相关的论文"
 
@@ -297,6 +303,7 @@ paper-agent setup claude-code
 # ✅ MCP → .mcp.json
 # ✅ Commands → .claude/commands  (/start-my-day, /paper-search, ..., /paper-setup)
 # ✅ CLAUDE.md → CLAUDE.md
+# ✅ Workspace → .paper-agent/
 ```
 
 生成的文件：
@@ -304,6 +311,13 @@ paper-agent setup claude-code
 my-research-project/
 ├── .mcp.json                     ← 告诉 Claude Code 启动 paper-agent-mcp
 ├── CLAUDE.md                     ← 告诉 AI 有哪些工具可用
+├── .paper-agent/                 ← 研究工作台（仪表盘、日志、笔记、分组）
+│   ├── README.md                 ← 自动更新的研究仪表盘
+│   ├── research-journal.md       ← 研究日志
+│   ├── reading-list.md           ← 阅读队列
+│   ├── collections/              ← 论文分组
+│   ├── notes/                    ← 论文笔记
+│   └── citation-traces/          ← 引用链追踪
 └── .claude/
     └── commands/
         ├── start-my-day.md       ← /start-my-day

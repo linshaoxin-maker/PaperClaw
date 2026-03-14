@@ -202,7 +202,7 @@
 | 功能 | 说明 | 关联 Workspace 文件 |
 |------|------|-------------------|
 | **论文笔记** | MCP 工具 `paper_note_add` / `paper_note_show` + notes 表 | `notes/` |
-| **论文分组** | MCP 工具 `paper_collection_create` / `_add` / `_show` + collections 表 | `collections/` |
+| **论文分组** | MCP 工具 `paper_group_create` / `_add` / `_show` + paper_groups 表 | `collections/` |
 
 ### P2 — 优化
 

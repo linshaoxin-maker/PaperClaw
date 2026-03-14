@@ -2,7 +2,7 @@
 
 **Phase:** Phase 0
 **Status:** Draft
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-14
 
 ---
 
@@ -38,37 +38,41 @@ Day 1+: 每日循环
 
 ## 旅程 1：Workspace 初始化
 
+Workspace 在运行 `paper-agent setup cursor/claude-code` 时自动创建，无需额外操作：
+
 ```
-You: /paper-setup
+$ paper-agent setup claude-code
+✅ MCP → .mcp.json
+✅ Commands → .claude/commands
+✅ Workspace → .paper-agent/
+```
 
-Claude: [检测到没有 .paper-agent/ 目录]
+如果用户跳过了 setup，MCP 工具在首次使用时会静默自动创建 workspace。
 
-        你还没有初始化研究工作台。要创建吗？
-        这会在项目根目录生成 .paper-agent/ 目录，
-        包含阅读队列、研究日志、笔记等文件。
+用户可以随时查看 workspace 仪表盘：
 
-You: 好
+```
+You: 看看我的研究全貌
 
-Claude: [调用 paper_workspace_init()]
+Claude: [调用 paper_workspace_status()]
 
-        ✅ 研究工作台已创建：
+        📊 Research Dashboard
 
-        .paper-agent/
-        ├── research-journal.md    ← 研究日志
-        ├── reading-list.md        ← 阅读队列
-        └── collections/           ← 论文分组
-            └── _index.md
+        **阅读进度**
+        | 待读 | 阅读中 | 已读 | 重要 |
+        |------|--------|------|------|
+        | 5    | 1      | 3    | 2    |
 
-        这些文件会随你的使用自动更新。
-        你也可以直接在 IDE 里打开编辑。
+        **论文分组** (1 个)
+        - rl-placement-papers (5 篇)
 
-        要开始配置研究方向吗？
+        仪表盘已更新 → .paper-agent/README.md
 ```
 
 ### 情感曲线
 - 触点：首次接触 workspace 概念
-- 情感：好奇（"这些文件是干什么的？"）→ 理解（看到目录结构）→ 安心（"随时能打开看"）
-- 痛点：无——初始化是一次性的
+- 情感：好奇（"这些文件是干什么的？"）→ 理解（看到仪表盘）→ 安心（"随时能打开看"）
+- 痛点：无——初始化由 setup 自动完成
 
 ---
 
@@ -188,20 +192,20 @@ Claude: [调用 paper_citations("nature2021.chip", direction="citations")]
 ```
 You: 创建一个 "RL Placement" 的论文集合
 
-Claude: [调用 paper_collection_create("rl-placement",
+Claude: [调用 paper_group_create("rl-placement",
             description="Survey on RL-based placement methods"
         )]
 
-        ✅ 集合已创建：.paper-agent/collections/rl-placement.md
+        ✅ 分组已创建：.paper-agent/collections/rl-placement.md
 
 You: 把刚才引用链里的那几篇加进去
 
-Claude: [调用 paper_collection_add("rl-placement",
+Claude: [调用 paper_group_add("rl-placement",
             paper_ids=["2603.04567", "nature2021.chip",
                        "2501.05678", "2401.09012", "2504.03456"]
         )]
 
-        ✅ 已添加 5 篇到 "RL Placement" 集合。
+        ✅ 已添加 5 篇到 "RL Placement" 分组。
 
         [自动更新 collections/rl-placement.md]
         [自动更新 collections/_index.md]
@@ -279,13 +283,39 @@ Claude: [调用 paper_workspace_sync()]
 
 ---
 
+## 旅程 7：按标题精确查找 + 下载
+
+```
+You: 帮我找一下 "Attention Is All You Need" 这篇论文
+
+Claude: [调用 paper_find_and_download(title="Attention Is All You Need")]
+
+        ✅ 找到了！
+
+        **Attention Is All You Need**
+        - Authors: Ashish Vaswani, Noam Shazeer, et al.
+        - Source: Semantic Scholar → arXiv:1706.03762
+        - 已保存到本地库
+
+        📥 PDF 已下载：papers/1706.03762_Attention_Is_All_You_Need.pdf
+
+        要深入分析这篇吗？
+```
+
+### 情感曲线
+- 触点：用户知道标题但不知道 arXiv ID → 直接给标题 → 全自动
+- 情感：懒得查（"我就知道名字"）→ 惊喜（"直接就找到并下载了"）→ 信赖
+- 痛点：标题不精确时可能匹配失败，需要提示用 `paper_search_online`
+
+---
+
 ## 错误恢复
 
 | 错误场景 | 用户看到什么 | 恢复路径 |
 |---------|------------|---------|
-| Workspace 目录被删 | AI 检测到目录不存在 | 提示运行 `paper_workspace_init()` 重建 |
-| journal 文件损坏 | AI 读取失败 | 从数据库操作日志重建 journal |
-| reading-list 与数据库不一致 | AI 检测到差异 | 提示 `paper_workspace_sync()` 同步 |
+| Workspace 目录被删 | AI 检测到目录不存在 | MCP 工具自动 auto-init 重建 |
+| journal 文件损坏 | AI 读取失败 | 通过 `rebuild_all()` 从数据库重建 |
+| reading-list 与数据库不一致 | AI 检测到差异 | MCP 工具自动从 DB 重新生成文件 |
 | 笔记文件被意外删除 | 数据库中笔记仍在 | 从数据库重建 notes/ 目录 |
 | S2 API 调用失败 | 引用链查询超时 | 重试 + 降级提示"稍后再试" |
 
@@ -315,6 +345,9 @@ Claude: [调用 paper_workspace_sync()]
 14:00  "基于这个集合做 survey"
        → 读取 collection → paper_batch_show → 生成综述
        → journal 记录
+
+15:00  "帮我找一下 DREAMPlace 那篇论文，下载一下"
+       → paper_find_and_download("DREAMPlace...") → S2 匹配 → 入库 + PDF 下载
 
 === 次日 ===
 

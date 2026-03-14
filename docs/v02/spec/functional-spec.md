@@ -2,25 +2,22 @@
 
 **Phase:** Phase 2 (功能规格)
 **Status:** Draft
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-14
 
 ---
 
 ## 1. Workspace 初始化
 
-### 1.1 MCP Tool: `paper_workspace_init`
+### 1.1 初始化方式
 
-**触发**：用户首次使用 workspace 相关功能，或显式调用
-**输入**：`workspace_dir: str | None`（默认当前工作目录下 `.paper-agent/`）
+Workspace 初始化不再是独立 MCP 工具，改为以下两种途径：
 
-**行为**：
-1. 检查 `{workspace_dir}` 是否已存在
-   - 已存在且完整 → 返回 `{"status": "already_initialized", "path": "..."}`
-   - 已存在但不完整 → 补全缺失文件
-   - 不存在 → 创建目录结构
-2. 创建以下文件/目录：
+**途径 A：`paper-agent setup cursor/claude-code` CLI 命令**
+- `setup` 命令在写入 IDE 配置后自动调用 `WorkspaceManager.init()`
+- 创建 `.paper-agent/` 目录结构：
    ```
    .paper-agent/
+   ├── README.md               ← 自动更新的仪表盘
    ├── research-journal.md     ← 空模板
    ├── reading-list.md         ← 空模板
    ├── collections/
@@ -28,10 +25,41 @@
    ├── notes/                  ← 空目录
    └── citation-traces/        ← 空目录
    ```
-3. 返回 `{"status": "initialized", "path": "...", "files_created": [...]}`
 
-**异常**：
-- 无写权限 → `{"status": "error", "message": "Permission denied"}`
+**途径 B：MCP 工具静默自动初始化**
+- 所有写操作 MCP 工具（`paper_reading_status`、`paper_note_add`、`paper_group_create` 等）在执行前调用 `_ensure_workspace()` → `WorkspaceManager.ensure_initialized()`
+- 如果 `.paper-agent/` 不存在则静默创建，不阻塞主操作
+
+### 1.2 MCP Tool: `paper_workspace_status`
+
+**触发**：用户想查看研究全貌
+**输入**：无
+
+**行为**：
+1. 调用 `_ensure_workspace()` 确保 workspace 存在
+2. 调用 `WorkspaceManager.rebuild_dashboard()` 重新生成 `.paper-agent/README.md` 仪表盘
+3. 调用 `WorkspaceManager.get_context()` 返回上下文摘要
+4. 返回上下文 + dashboard 文件路径
+
+**返回格式**：
+```json
+{
+  "journal_recent": [...],
+  "reading_stats": {...},
+  "groups": [...],
+  "dashboard_file": ".paper-agent/README.md"
+}
+```
+
+### 1.3 `.paper-agent/README.md` 仪表盘格式
+
+自动生成，包含：
+- 阅读进度表格（待读/阅读中/已读/重要）
+- 论文分组列表（含论文数）
+- 最近笔记（最新 10 篇）
+- 引用链追踪列表
+- 最近活动（journal 最新 8 条）
+- 底部标注"此文件由 paper-agent 自动生成"
 
 ---
 
@@ -64,8 +92,9 @@
 | `paper_search_online` | 在线搜索: "{query}" → arXiv {n1} + S2 {n2} 篇 |
 | `paper_reading_status` | 标记{status}: {paper_titles} |
 | `paper_note_add` | 笔记: {paper_title} — {content_preview} |
-| `paper_collection_create` | 创建集合: {name} |
-| `paper_collection_add` | 添加到 {collection}: {count} 篇 |
+| `paper_group_create` | 创建分组: {name} |
+| `paper_group_add` | 添加到 {group}: {count} 篇 |
+| `paper_find_and_download` | 精确查找: "{title}" → 入库 + 下载 PDF |
 | `paper_citations` | 引用链: {paper_title} → {direction} {count} 篇 |
 | `paper_compare` | 对比: {count} 篇论文 |
 | `paper_download` | 下载: {count} 篇 PDF |
@@ -88,7 +117,7 @@
 ALTER TABLE papers ADD COLUMN reading_status TEXT DEFAULT NULL;
 -- 值: NULL (未标记) | 'to_read' | 'reading' | 'read' | 'important'
 
-ALTER TABLE papers ADD COLUMN reading_status_updated_at TEXT DEFAULT NULL;
+ALTER TABLE papers ADD COLUMN reading_status_at TEXT DEFAULT NULL;
 ```
 
 ### 3.2 MCP Tool: `paper_reading_status`
@@ -164,15 +193,15 @@ ALTER TABLE papers ADD COLUMN reading_status_updated_at TEXT DEFAULT NULL;
 ### 4.1 Schema
 
 ```sql
-CREATE TABLE notes (
+CREATE TABLE paper_notes (
     id TEXT PRIMARY KEY,
     paper_id TEXT NOT NULL REFERENCES papers(id),
     content TEXT NOT NULL,
-    source TEXT DEFAULT 'user',  -- 'user' | 'ai_analysis'
+    source TEXT NOT NULL DEFAULT 'user',  -- 'user' | 'ai_analysis'
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-CREATE INDEX idx_notes_paper ON notes(paper_id);
+CREATE INDEX idx_paper_notes_paper ON paper_notes(paper_id);
 ```
 
 ### 4.2 MCP Tool: `paper_note_add`
@@ -184,7 +213,7 @@ CREATE INDEX idx_notes_paper ON notes(paper_id);
 
 **行为**：
 1. 验证 paper_id 存在
-2. 插入 notes 表
+2. 插入 paper_notes 表
 3. 创建/更新 `notes/{paper_id}.md`：
    - 文件头：论文标题 + 元数据
    - 按时间倒序排列笔记条目
@@ -220,44 +249,46 @@ CREATE INDEX idx_notes_paper ON notes(paper_id);
 
 ---
 
-## 5. 论文集合
+## 5. 论文分组
+
+> 注意：已有的 `collections` 表是**采集记录**表，论文分组使用 `paper_groups` + `paper_group_items` 避免冲突。
 
 ### 5.1 Schema
 
 ```sql
-CREATE TABLE collections (
+CREATE TABLE paper_groups (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    description TEXT DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 
-CREATE TABLE collection_papers (
-    collection_id TEXT NOT NULL REFERENCES collections(id),
+CREATE TABLE paper_group_items (
+    group_id TEXT NOT NULL REFERENCES paper_groups(id),
     paper_id TEXT NOT NULL REFERENCES papers(id),
     added_at TEXT NOT NULL,
-    note TEXT DEFAULT '',
-    PRIMARY KEY (collection_id, paper_id)
+    note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (group_id, paper_id)
 );
 ```
 
-### 5.2 MCP Tool: `paper_collection_create`
+### 5.2 MCP Tool: `paper_group_create`
 
 **输入**：`name: str`, `description: str = ""`
 **行为**：
 1. 验证名称不重复
-2. 插入 collections 表
+2. 插入 paper_groups 表
 3. 创建 `collections/{name}.md`（空模板 + 描述）
 4. 更新 `collections/_index.md`
 5. 追加 journal 条目
 
-### 5.3 MCP Tool: `paper_collection_add`
+### 5.3 MCP Tool: `paper_group_add`
 
-**输入**：`collection_name: str`, `paper_ids: list[str]`
+**输入**：`name: str`, `paper_ids: list[str]`
 **行为**：
-1. 验证集合和论文都存在
-2. 批量插入 collection_papers（已存在的跳过）
+1. 验证分组和论文都存在
+2. 批量插入 paper_group_items（已存在的跳过）
 3. 重新生成 `collections/{name}.md`
 4. 追加 journal 条目
 5. 返回 `{"status": "ok", "added": N, "skipped": M, "total": T}`
@@ -342,7 +373,7 @@ CREATE TABLE collection_papers (
 
 **输入**：无
 **行为**：
-1. 检查 `.paper-agent/` 是否存在（不存在 → 返回空上下文）
+1. 调用 `_ensure_workspace()` 确保 workspace 存在（不存在 → 静默创建）
 2. 读取 journal 最近 10 条
 3. 读取 reading-list 摘要（各状态数量 + to_read 和 reading 的具体论文）
 4. 读取 collections/_index.md 获取活跃集合列表
@@ -373,7 +404,57 @@ CREATE TABLE collection_papers (
 
 ---
 
-## 8. 文件写入规范（跨功能）
+## 8. 精确查找 + 下载
+
+### 8.1 MCP Tool: `paper_find_and_download`
+
+**输入**：
+- `title: str` — 论文标题（精确或近似）
+- `output_dir: str = "papers"` — PDF 下载目录
+- `save_to_library: bool = True` — 是否保存到本地库
+
+**行为**：
+1. **策略 1 — Semantic Scholar 标题搜索**
+   - 调用 `GET /graph/v1/paper/search?query={title}&limit=5`
+   - 返回结果逐个匹配标题（`_title_match`：忽略大小写和标点）
+   - 匹配成功 → 提取 arXiv ID、DOI、open-access URL
+2. **策略 2 — arXiv 标题搜索**（S2 未匹配时 fallback）
+   - 调用 arXiv API `ti:"{title}"`
+   - 逐个匹配标题
+3. **入库**：匹配到的论文保存到本地库（`save_papers`）
+4. **下载 PDF**：
+   - 优先：`https://arxiv.org/pdf/{arxiv_id}.pdf`
+   - 其次：S2 `openAccessPdf.url`
+   - 保存到 `{output_dir}/{id}_{safe_title}.pdf`
+5. **返回结果**：论文元数据 + 下载状态
+
+**返回格式**：
+```json
+{
+  "status": "ok",
+  "title_query": "Attention Is All You Need",
+  "matched_via": "semantic_scholar",
+  "paper": {"id": "...", "title": "...", "authors": [...]},
+  "saved_to_library": true,
+  "download": {"status": "downloaded", "path": "papers/1706.03762_Attention_Is_All_You_Need.pdf"}
+}
+```
+
+**异常**：
+- 标题未匹配 → `{"status": "not_found", "message": "Try paper_search_online with keywords."}`
+- PDF 不可用 → `download.status = "no_pdf_url"`
+
+### 8.2 `_title_match` 算法
+
+```python
+def _title_match(query: str, candidate: str) -> bool:
+    # 1. 转小写，移除标点
+    # 2. 精确匹配或子串包含
+```
+
+---
+
+## 9. 文件写入规范（跨功能）
 
 ### 8.1 原则
 
