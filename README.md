@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="PaperClaw Logo" width="200">
+</p>
+
 <h1 align="center">PaperClaw</h1>
 
 <p align="center">
