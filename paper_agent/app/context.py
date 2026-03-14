@@ -15,8 +15,10 @@ from paper_agent.infra.storage.sqlite_storage import SQLiteStorage
 from paper_agent.services.collection_manager import CollectionManager
 from paper_agent.services.digest_generator import DigestGenerator
 from paper_agent.services.filtering_manager import FilteringManager
+from paper_agent.services.citation_service import CitationService
 from paper_agent.services.search_engine import SearchEngine
 from paper_agent.services.source_collector import SourceCollector
+from paper_agent.services.workspace_manager import WorkspaceManager
 
 
 class AppContext:
@@ -126,3 +128,13 @@ class AppContext:
     @cached_property
     def digest_generator(self) -> DigestGenerator:
         return DigestGenerator(self.storage)
+
+    @cached_property
+    def workspace_manager(self) -> WorkspaceManager:
+        cfg = self.config
+        workspace_dir = Path(cfg.data_dir).parent / ".paper-agent"
+        return WorkspaceManager(workspace_dir, self.storage)
+
+    @cached_property
+    def citation_service(self) -> CitationService:
+        return CitationService(self.storage)

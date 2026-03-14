@@ -63,13 +63,28 @@
 | **Poetry** | Python 依赖管理和打包工具 | 开发环境 |
 | **Typer** | Python CLI 框架，用于构建 paper-agent 命令行 | CLI 层 |
 
+## Workspace 术语 (v02)
+
+| 术语 | 定义 | 上下文 |
+|------|------|--------|
+| **Workspace** | `.paper-agent/` 目录下的一组 markdown 文件，作为研究员和 AI 的共享工作记忆 | v02 核心概念 |
+| **Workspace Layer** | 架构层：位于交互层和数据层之间，负责持久化人可读的研究状态 | 三层架构 |
+| **Research Journal** | `research-journal.md`，记录研究操作日志（搜索、阅读、分析等），AI 用于恢复上下文 | 最近 50 条，自动归档 |
+| **Reading List** | `reading-list.md`，按状态（to-read/reading/read/important）管理论文阅读队列 | 双向同步：MCP 工具 ↔ 手动编辑 |
+| **Collection** | `collections/{name}.md`，命名的论文分组，含用途描述和论文列表 | 类似 Zotero Collections |
+| **Paper Note** | `notes/{paper-id}.md`，单篇论文的笔记（用户手写 + AI 生成分析） | 每篇论文一个文件 |
+| **Citation Trace** | `citation-traces/{topic}.md`，引用链探索记录（forward + backward citations） | 基于 S2 API |
+| **Reading Status** | 论文阅读状态：`to_read` → `reading` → `read` → `important` | Paper model 新增字段 |
+| **Context Recovery** | AI 在新会话开始时读取 journal + reading-list 恢复上下文 | 跨会话记忆 |
+| **Workspace Sync** | Workspace 文件与数据库之间的双向同步操作 | 容错机制 |
+
 ## 版本术语
 
 | 术语 | 定义 | 上下文 |
 |------|------|--------|
-| **v01** | 基础版本：CLI + MCP + 单源 arXiv + 单篇智能 | 当前 |
-| **v01_source** | v01 扩展：多源收集 + Source Registry + Profile 引导增强 | 进行中 |
-| **v02** | 下一大版本：多篇智能 + 对比/综述 + 联网搜索 + PDF 下载 | 规划中 |
+| **v01** | 基础版本 + 多源扩展：CLI + MCP + arXiv/DBLP/S2 + 多篇智能 | 已实现 |
+| **v02** | Workspace Layer 版本：阅读管理 + 笔记 + 分组 + 引用链 + 跨会话记忆 | 设计中 |
+| **v03+** | 远期：Paper Q&A + 趋势分析 + Related Work 生成 + 团队协作 | 规划中 |
 
 ---
 

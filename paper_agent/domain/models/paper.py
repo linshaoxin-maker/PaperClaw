@@ -25,6 +25,8 @@ class Paper:
     recommendation_reason: str = ""
     lifecycle_state: str = "discovered"
     metadata: dict[str, Any] = field(default_factory=dict)
+    reading_status: str | None = None  # to_read | reading | read | important
+    reading_status_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
 

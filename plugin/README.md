@@ -80,12 +80,48 @@ plugin/
 | `paper_batch_show(paper_ids, detail)` | 批量查看（默认 compact 精简输出，`detail=True` 全量） |
 | `paper_compare(paper_ids, aspects)` | 结构化对比数据 |
 
+### Workspace（v02 新增）
+
+| 工具 | 说明 |
+|------|------|
+| `paper_workspace_init()` | 初始化 `.paper-agent/` 目录（journal、reading-list、notes、collections、citation-traces） |
+| `paper_workspace_context()` | 返回研究上下文摘要，用于新会话恢复（AI 读此知道你之前在干什么） |
+| `paper_reading_status(paper_ids, status)` | 设置阅读状态：`to_read` / `reading` / `read` / `important`，自动更新 reading-list.md |
+| `paper_reading_stats()` | 查看阅读进度统计（各状态计数 + 最近论文） |
+| `paper_note_add(paper_id, content)` | 添加笔记（用户手写或 AI 分析），自动同步到 `notes/{id}.md` |
+| `paper_note_show(paper_id)` | 查看某篇论文的所有笔记 |
+| `paper_group_create(name, description)` | 创建命名的论文分组，自动生成 `collections/{name}.md` |
+| `paper_group_add(name, paper_ids)` | 向分组添加论文 |
+| `paper_group_show(name)` | 查看分组内论文列表 |
+| `paper_group_list()` | 列出所有分组及论文数 |
+| `paper_citations(paper_id, direction)` | 通过 Semantic Scholar 查询引用/被引用关系，新论文自动入库，结果保存到 citation-traces/ |
+
 ### 导出与下载
 
 | 工具 | 说明 |
 |------|------|
 | `paper_download(paper_ids)` | 批量下载 PDF（一次传多个 ID） |
 | `paper_export(paper_ids, format)` | 导出 BibTeX / Markdown / JSON |
+
+## Workspace 文件结构
+
+运行 `paper_workspace_init()` 后，在项目目录下生成：
+
+```
+.paper-agent/
+├── research-journal.md         ← 研究日志（AI 自动记录每次操作）
+├── reading-list.md             ← 阅读队列（按状态分组）
+├── collections/                ← 论文分组
+│   ├── _index.md               ← 分组索引
+│   └── rl-placement.md         ← 每个分组一个文件
+├── notes/                      ← 论文笔记
+│   └── {paper_id}.md           ← 每篇论文一个文件
+└── citation-traces/            ← 引用链追踪
+    └── {trace_name}.md         ← 每次追踪一个文件
+```
+
+> 所有文件都是标准 markdown，可以直接在 IDE 中打开查看、编辑。
+> 数据库是真相源，文件是"投影"——丢失可通过 `paper_workspace_init()` 重建。
 
 ## 这个目录 vs `paper-agent setup`
 

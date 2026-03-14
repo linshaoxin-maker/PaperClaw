@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -386,7 +387,319 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             })
         return json.dumps({"templates": items}, ensure_ascii=False, default=str)
 
-    # ── v02 Tools ──────────────────────────────────────────────────────
+    # ── v02 Workspace Tools ────────────────────────────────────────────
+
+    @mcp.tool()
+    def paper_workspace_init(workspace_dir: str | None = None) -> str:
+        """Initialize the .paper-agent/ workspace directory.
+
+        Creates the workspace directory with template files for research
+        journal, reading list, collections, notes, and citation traces.
+        Safe to call multiple times — repairs missing files if needed.
+
+        Args:
+            workspace_dir: Custom workspace path. Default: .paper-agent/ in project root.
+
+        Returns:
+            JSON object with status and list of created files.
+        """
+        if workspace_dir:
+            ctx.workspace_manager._root = Path(workspace_dir)
+        result = ctx.workspace_manager.init()
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_workspace_context() -> str:
+        """Get workspace context for session recovery.
+
+        Returns recent journal entries, reading stats, collection list,
+        and citation traces. Use this at the start of a conversation to
+        understand what the researcher has been working on.
+
+        Returns:
+            JSON object with journal, reading stats, collections, traces.
+        """
+        result = ctx.workspace_manager.get_context()
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_reading_status(paper_ids: list[str], status: str) -> str:
+        """Set the reading status of one or more papers.
+
+        Args:
+            paper_ids: List of paper IDs to update.
+            status: One of 'to_read', 'reading', 'read', 'important'.
+
+        Returns:
+            JSON object with update count and reading stats.
+        """
+        valid = {"to_read", "reading", "read", "important"}
+        if status not in valid:
+            return json.dumps({"error": f"Invalid status '{status}'. Use: {sorted(valid)}"})
+
+        resolved_ids: list[str] = []
+        not_found: list[str] = []
+        for pid in paper_ids:
+            p = _resolve_paper(pid)
+            if p:
+                resolved_ids.append(p.id)
+            else:
+                not_found.append(pid)
+
+        updated = ctx.storage.update_reading_status(resolved_ids, status)
+        ctx.workspace_manager.rebuild_reading_list()
+        ctx.workspace_manager.append_journal(
+            f"标记 {updated} 篇论文为 {status}",
+            {"paper_ids": resolved_ids[:5], "status": status},
+        )
+
+        stats = ctx.storage.get_reading_stats()
+        result: dict[str, Any] = {
+            "status": "ok",
+            "updated": updated,
+            "reading_stats": stats,
+        }
+        if not_found:
+            result["not_found"] = not_found
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_reading_stats() -> str:
+        """Show reading progress statistics.
+
+        Returns:
+            JSON object with counts per reading status.
+        """
+        stats = ctx.storage.get_reading_stats()
+        papers_by_status: dict[str, list[dict]] = {}
+        for s in ("important", "reading", "to_read"):
+            papers = ctx.storage.get_papers_by_reading_status(s, limit=10)
+            papers_by_status[s] = [
+                {"id": p.id, "title": p.title, "score": p.relevance_score}
+                for p in papers
+            ]
+        return json.dumps({
+            "stats": stats,
+            "recent_by_status": papers_by_status,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_note_add(paper_id: str, content: str, source: str = "user") -> str:
+        """Add a note to a paper.
+
+        Args:
+            paper_id: Paper ID (internal, canonical, or arXiv ID).
+            content: Note content (markdown supported).
+            source: Note source — 'user' for manual notes, 'ai_analysis' for
+                    AI-generated analysis.
+
+        Returns:
+            JSON object with note ID and file path.
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        note_id = uuid.uuid4().hex[:12]
+        ctx.storage.save_note(note_id, paper.id, content, source)
+        file_path = ctx.workspace_manager.sync_note_file(paper.id)
+        ctx.workspace_manager.append_journal(
+            f"添加笔记: {paper.title[:60]}",
+            {"paper_id": paper.id, "source": source},
+        )
+        return json.dumps({
+            "status": "ok",
+            "note_id": note_id,
+            "paper_id": paper.id,
+            "file": str(file_path) if file_path else None,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_note_show(paper_id: str) -> str:
+        """Show all notes for a paper.
+
+        Args:
+            paper_id: Paper ID.
+
+        Returns:
+            JSON object with paper info and list of notes.
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        notes = ctx.storage.get_notes(paper.id)
+        return json.dumps({
+            "paper_id": paper.id,
+            "title": paper.title,
+            "notes": notes,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_group_create(name: str, description: str = "") -> str:
+        """Create a named paper group (collection).
+
+        Args:
+            name: Group name, e.g. 'rl-placement-papers'.
+            description: Optional description of the group's purpose.
+
+        Returns:
+            JSON object with group ID and file path.
+        """
+        existing = ctx.storage.get_group(name)
+        if existing:
+            return json.dumps({"error": f"Group '{name}' already exists.", "id": existing["id"]})
+
+        group_id = uuid.uuid4().hex[:12]
+        ctx.storage.create_group(group_id, name, description)
+        file_path = ctx.workspace_manager.sync_collection_file(name)
+        ctx.workspace_manager.append_journal(
+            f"创建分组: {name}",
+            {"description": description},
+        )
+        return json.dumps({
+            "status": "ok",
+            "id": group_id,
+            "name": name,
+            "file": str(file_path) if file_path else None,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_group_add(name: str, paper_ids: list[str]) -> str:
+        """Add papers to an existing group.
+
+        Args:
+            name: Group name.
+            paper_ids: List of paper IDs to add.
+
+        Returns:
+            JSON object with add count and group total.
+        """
+        group = ctx.storage.get_group(name)
+        if not group:
+            return json.dumps({"error": f"Group '{name}' not found. Create it first with paper_group_create."})
+
+        resolved_ids: list[str] = []
+        not_found: list[str] = []
+        for pid in paper_ids:
+            p = _resolve_paper(pid)
+            if p:
+                resolved_ids.append(p.id)
+            else:
+                not_found.append(pid)
+
+        added = ctx.storage.add_papers_to_group(group["id"], resolved_ids)
+        ctx.workspace_manager.sync_collection_file(name)
+        ctx.workspace_manager.append_journal(
+            f"添加 {added} 篇论文到分组 {name}",
+            {"paper_ids": resolved_ids[:5]},
+        )
+
+        total_papers = len(ctx.storage.get_group_papers(name))
+        result: dict[str, Any] = {
+            "status": "ok",
+            "added": added,
+            "total_in_group": total_papers,
+        }
+        if not_found:
+            result["not_found"] = not_found
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_group_show(name: str) -> str:
+        """Show papers in a group.
+
+        Args:
+            name: Group name.
+
+        Returns:
+            JSON object with group info and paper list.
+        """
+        group = ctx.storage.get_group(name)
+        if not group:
+            return json.dumps({"error": f"Group '{name}' not found."})
+
+        papers = ctx.storage.get_group_papers(name)
+        return json.dumps({
+            "name": name,
+            "description": group.get("description", ""),
+            "count": len(papers),
+            "papers": [p.to_summary_dict() for p in papers],
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_group_list() -> str:
+        """List all paper groups.
+
+        Returns:
+            JSON object with list of groups and paper counts.
+        """
+        groups = ctx.storage.list_groups()
+        return json.dumps({
+            "count": len(groups),
+            "groups": [
+                {
+                    "name": g["name"],
+                    "description": g.get("description", ""),
+                    "papers": g.get("paper_count", 0),
+                    "updated_at": g.get("updated_at", ""),
+                }
+                for g in groups
+            ],
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_citations(
+        paper_id: str,
+        direction: str = "both",
+        limit: int = 20,
+        trace_name: str | None = None,
+    ) -> str:
+        """Get citation relationships for a paper via Semantic Scholar.
+
+        Queries the S2 API for papers that this paper references (backward)
+        and/or papers that cite this paper (forward). New papers found are
+        automatically saved to the local library.
+
+        Args:
+            paper_id: Paper ID (internal, canonical, or arXiv ID).
+            direction: 'references' (backward), 'citations' (forward), or 'both'.
+            limit: Max results per direction (default 20).
+            trace_name: Optional name for saving a citation trace file.
+                        If provided, results are saved to .paper-agent/citation-traces/.
+
+        Returns:
+            JSON object with references and/or citations lists.
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        result = ctx.citation_service.get_citations(paper.id, direction, limit)
+
+        if "error" not in result and trace_name:
+            ctx.workspace_manager.update_citation_trace(
+                trace_name,
+                paper.id,
+                paper.title,
+                result.get("references", []),
+                result.get("citations", []),
+            )
+            result["trace_file"] = str(
+                ctx.workspace_manager.root / "citation-traces" / f"{trace_name}.md"
+            )
+
+        ctx.workspace_manager.append_journal(
+            f"查询引用: {paper.title[:60]}",
+            {
+                "direction": direction,
+                "references": len(result.get("references", [])),
+                "citations": len(result.get("citations", [])),
+            },
+        )
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    # ── v02 Multi-paper Intelligence ──────────────────────────────────
 
     @mcp.tool()
     def paper_batch_show(paper_ids: list[str], detail: bool = False) -> str:

@@ -17,26 +17,39 @@ from paper_agent.mcp.tools import register_tools
 _DESCRIPTION = """\
 Paper Agent MCP Server — paper intelligence for AI researchers.
 
-Tools (v01 — single-paper):
+Tools (v01 — core):
   paper_search          Search the local paper library
-  paper_show            Show paper details by ID (supports bare arXiv IDs)
-  paper_collect         Collect papers from arXiv
+  paper_show            Show paper details by ID
+  paper_collect         Collect papers from all enabled sources
   paper_digest          Generate daily digest
   paper_stats           Library statistics
   paper_profile         Current research profile
-  paper_profile_update  Create/update profile (topics, keywords, sources)
+  paper_profile_update  Create/update profile
   paper_sources_list    List all available sources
   paper_sources_enable  Enable/disable sources
   paper_templates_list  List research area templates
 
+Tools (v02 — workspace layer):
+  paper_workspace_init     Initialize .paper-agent/ workspace
+  paper_workspace_context  Get workspace context for session recovery
+  paper_reading_status     Set reading status (to_read/reading/read/important)
+  paper_reading_stats      Show reading progress statistics
+  paper_note_add           Add a note to a paper
+  paper_note_show          Show all notes for a paper
+  paper_group_create       Create a named paper group
+  paper_group_add          Add papers to a group
+  paper_group_show         Show papers in a group
+  paper_group_list         List all paper groups
+  paper_citations          Get citation chain via Semantic Scholar
+
 Tools (v02 — multi-paper intelligence):
-  paper_search_batch    Search multiple topics at once (for surveys / comparisons)
+  paper_search_batch    Search multiple topics at once
   paper_batch_show      Get details for multiple papers at once
-  paper_compare         Structured comparison data for multiple papers
-  paper_survey_collect  Collect papers over N years for literature surveys
-  paper_export          Export papers to BibTeX / markdown / JSON
-  paper_download        Download PDF files from arXiv
-  paper_search_online   Search arXiv API in real-time (not just local library)
+  paper_compare         Structured comparison data
+  paper_survey_collect  Collect papers for literature surveys
+  paper_export          Export to BibTeX / markdown / JSON
+  paper_download        Download PDFs from arXiv
+  paper_search_online   Real-time search via arXiv + S2
 
 Resources:
   paper://digest/today  Today's digest

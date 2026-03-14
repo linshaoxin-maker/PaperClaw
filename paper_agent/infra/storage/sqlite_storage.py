@@ -12,7 +12,7 @@ from paper_agent.domain.models.paper import Paper
 from paper_agent.domain.models.digest import Digest, DigestStats
 from paper_agent.domain.models.collection import CollectionRecord
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS papers (
     recommendation_reason TEXT NOT NULL DEFAULT '',
     lifecycle_state TEXT NOT NULL DEFAULT 'discovered',
     metadata_json TEXT NOT NULL DEFAULT '{}',
+    reading_status TEXT DEFAULT NULL,
+    reading_status_at TEXT DEFAULT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -119,8 +121,73 @@ CREATE INDEX IF NOT EXISTS idx_topic_reports_topic
     ON topic_reports(topic_key, created_at);
 CREATE INDEX IF NOT EXISTS idx_surveys_entry
     ON surveys(entry_point_type, created_at);
+CREATE TABLE IF NOT EXISTS paper_notes (
+    id TEXT PRIMARY KEY,
+    paper_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'user',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+CREATE INDEX IF NOT EXISTS idx_paper_notes_paper ON paper_notes(paper_id);
+
+CREATE TABLE IF NOT EXISTS paper_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS paper_group_items (
+    group_id TEXT NOT NULL,
+    paper_id TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (group_id, paper_id),
+    FOREIGN KEY (group_id) REFERENCES paper_groups(id),
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_llm_cache_provider
     ON llm_cache(provider, model, task_type);
+"""
+
+_V2_MIGRATION_SQL = """
+-- v02: reading status on papers
+ALTER TABLE papers ADD COLUMN reading_status TEXT DEFAULT NULL;
+ALTER TABLE papers ADD COLUMN reading_status_at TEXT DEFAULT NULL;
+
+-- v02: paper notes
+CREATE TABLE IF NOT EXISTS paper_notes (
+    id TEXT PRIMARY KEY,
+    paper_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'user',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+CREATE INDEX IF NOT EXISTS idx_paper_notes_paper ON paper_notes(paper_id);
+
+-- v02: paper groups (user collections, distinct from 'collections' run-log table)
+CREATE TABLE IF NOT EXISTS paper_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS paper_group_items (
+    group_id TEXT NOT NULL,
+    paper_id TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (group_id, paper_id),
+    FOREIGN KEY (group_id) REFERENCES paper_groups(id),
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
 """
 
 _FTS_SQL = """
@@ -207,7 +274,47 @@ class SQLiteStorage:
             self.conn.execute(
                 "INSERT INTO schema_version (version) VALUES (?)", (_SCHEMA_VERSION,)
             )
-        self.conn.commit()
+            self.conn.commit()
+        else:
+            current = existing["version"]
+            if current < 2:
+                self._migrate_to_v2()
+            self.conn.commit()
+
+    def _migrate_to_v2(self) -> None:
+        cols = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(papers)").fetchall()
+        }
+        if "reading_status" not in cols:
+            self.conn.execute(
+                "ALTER TABLE papers ADD COLUMN reading_status TEXT DEFAULT NULL"
+            )
+            self.conn.execute(
+                "ALTER TABLE papers ADD COLUMN reading_status_at TEXT DEFAULT NULL"
+            )
+        for stmt in (
+            """CREATE TABLE IF NOT EXISTS paper_notes (
+                id TEXT PRIMARY KEY, paper_id TEXT NOT NULL,
+                content TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'user',
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                FOREIGN KEY (paper_id) REFERENCES papers(id))""",
+            "CREATE INDEX IF NOT EXISTS idx_paper_notes_paper ON paper_notes(paper_id)",
+            """CREATE TABLE IF NOT EXISTS paper_groups (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS paper_group_items (
+                group_id TEXT NOT NULL, paper_id TEXT NOT NULL,
+                added_at TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (group_id, paper_id),
+                FOREIGN KEY (group_id) REFERENCES paper_groups(id),
+                FOREIGN KEY (paper_id) REFERENCES papers(id))""",
+        ):
+            self.conn.execute(stmt)
+        self.conn.execute(
+            "UPDATE schema_version SET version = ?", (_SCHEMA_VERSION,)
+        )
 
     def close(self) -> None:
         if self._conn:
@@ -414,10 +521,122 @@ class SQLiteStorage:
         )
         self.conn.commit()
 
+    # ── Reading Status ──
+
+    def update_reading_status(self, paper_ids: list[str], status: str) -> int:
+        now = datetime.utcnow().isoformat()
+        updated = 0
+        for pid in paper_ids:
+            cur = self.conn.execute(
+                "UPDATE papers SET reading_status=?, reading_status_at=?, updated_at=? WHERE id=?",
+                (status, now, now, pid),
+            )
+            updated += cur.rowcount
+        self.conn.commit()
+        return updated
+
+    def get_reading_stats(self) -> dict[str, int]:
+        rows = self.conn.execute(
+            "SELECT reading_status, COUNT(*) as cnt FROM papers "
+            "WHERE reading_status IS NOT NULL GROUP BY reading_status"
+        ).fetchall()
+        return {row["reading_status"]: row["cnt"] for row in rows}
+
+    def get_papers_by_reading_status(
+        self, status: str | None = None, limit: int = 200
+    ) -> list[Paper]:
+        if status:
+            rows = self.conn.execute(
+                "SELECT * FROM papers WHERE reading_status=? "
+                "ORDER BY reading_status_at DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM papers WHERE reading_status IS NOT NULL "
+                "ORDER BY reading_status_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._row_to_paper(r) for r in rows]
+
+    # ── Paper Notes ──
+
+    def save_note(self, note_id: str, paper_id: str, content: str, source: str = "user") -> None:
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            "INSERT INTO paper_notes (id, paper_id, content, source, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET content=?, updated_at=?",
+            (note_id, paper_id, content, source, now, now, content, now),
+        )
+        self.conn.commit()
+
+    def get_notes(self, paper_id: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM paper_notes WHERE paper_id=? ORDER BY created_at",
+            (paper_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Paper Groups ──
+
+    def create_group(self, group_id: str, name: str, description: str = "") -> None:
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            "INSERT INTO paper_groups (id, name, description, created_at, updated_at) VALUES (?,?,?,?,?)",
+            (group_id, name, description, now, now),
+        )
+        self.conn.commit()
+
+    def get_group(self, name: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM paper_groups WHERE name=?", (name,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_groups(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT g.*, COUNT(gi.paper_id) as paper_count "
+            "FROM paper_groups g LEFT JOIN paper_group_items gi ON g.id=gi.group_id "
+            "GROUP BY g.id ORDER BY g.updated_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_papers_to_group(self, group_id: str, paper_ids: list[str]) -> int:
+        now = datetime.utcnow().isoformat()
+        added = 0
+        for pid in paper_ids:
+            try:
+                self.conn.execute(
+                    "INSERT INTO paper_group_items (group_id, paper_id, added_at) VALUES (?,?,?)",
+                    (group_id, pid, now),
+                )
+                added += 1
+            except sqlite3.IntegrityError:
+                pass
+        if added:
+            self.conn.execute(
+                "UPDATE paper_groups SET updated_at=? WHERE id=?", (now, group_id)
+            )
+        self.conn.commit()
+        return added
+
+    def get_group_papers(self, name: str, limit: int = 200) -> list[Paper]:
+        rows = self.conn.execute(
+            "SELECT p.* FROM papers p "
+            "JOIN paper_group_items gi ON p.id=gi.paper_id "
+            "JOIN paper_groups g ON g.id=gi.group_id "
+            "WHERE g.name=? ORDER BY gi.added_at DESC LIMIT ?",
+            (name, limit),
+        ).fetchall()
+        return [self._row_to_paper(r) for r in rows]
+
     # ── Internal ──
 
     def _row_to_paper(self, row: sqlite3.Row) -> Paper:
         pub = row["published_at"]
+        keys = row.keys()
+        rs = row["reading_status"] if "reading_status" in keys else None
+        rs_at = row["reading_status_at"] if "reading_status_at" in keys else None
         return Paper(
             id=row["id"],
             canonical_key=row["canonical_key"],
@@ -436,6 +655,8 @@ class SQLiteStorage:
             recommendation_reason=row["recommendation_reason"],
             lifecycle_state=row["lifecycle_state"],
             metadata=json.loads(row["metadata_json"]),
+            reading_status=rs,
+            reading_status_at=datetime.fromisoformat(rs_at) if rs_at else None,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )

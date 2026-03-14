@@ -170,6 +170,28 @@ Claude: [调用 paper_collect(days=7)]
 
         要看看今天的推荐吗？输入 /start-my-day 或者直接告诉我。
 
+        💡 **提示**: 初始化 Workspace 后，你的阅读进度、笔记、论文分组
+        都会以 markdown 文件的形式保存在 `.paper-agent/` 目录，打开文件夹就能看到。
+
+You: 先初始化一下 workspace
+
+Claude: [调用 paper_workspace_init()]
+
+        ✅ Workspace 初始化完成！
+
+        创建了以下文件：
+        ```
+        .paper-agent/
+        ├── research-journal.md     ← 研究日志（AI 的记忆）
+        ├── reading-list.md         ← 阅读队列
+        ├── collections/            ← 论文分组
+        │   └── _index.md
+        ├── notes/                  ← 论文笔记
+        └── citation-traces/        ← 引用链记录
+        ```
+
+        之后每次操作都会自动更新这些文件。看看推荐吗？
+
 You: 看看
 
 Claude: [调用 paper_digest()]
@@ -204,12 +226,22 @@ Claude: [调用 paper_digest()]
 
 ### 1. `/start-my-day` — 每日开工
 
-每天早上用一次，收集新论文并看推荐。
+每天早上用一次。先恢复上下文（你昨天在干什么），再收集新论文。
 
 ```
 You: /start-my-day
 
-Claude: 正在收集今日论文...
+Claude: 先看看你最近在研究什么...
+
+        [调用 paper_workspace_context()]
+
+        📋 **上下文恢复**
+        - 昨天搜索了 "RL placement" 相关论文（12 篇）
+        - 标记了 3 篇为"待读"，1 篇为"重要"
+        - 分组 "rl-placement" 有 7 篇论文
+        - 阅读进度：待读 5 | 阅读中 2 | 已读 8 | 重要 3
+
+        正在收集今日论文...
 
         [调用 paper_collect(days=1)]
 
@@ -449,15 +481,33 @@ Claude: [调用 paper_show("arxiv:2603.04567")]
 
         ---
 
-        分析完成。要保存到文件吗？
+        分析完成。要保存笔记吗？
 
-You: 保存到 notes/transformer-placement.md
+You: 保存一下
 
-Claude: [写入 notes/transformer-placement.md]
+Claude: [调用 paper_note_add(
+            paper_id="arxiv:2603.04567",
+            content="(上述完整分析内容)",
+            source="ai_analysis"
+        )]
 
-        ✅ 已保存到 `notes/transformer-placement.md`
+        ✅ 笔记已保存！
+        - 数据库记录：note_id = abc123
+        - 文件同步：`.paper-agent/notes/e3f2a1b9c0d4.md`
+        - 研究日志已更新
 
-        要继续分析其他论文吗？
+        打开 `.paper-agent/notes/` 就能看到。要继续分析其他论文吗？
+
+You: 顺便标记为"阅读中"
+
+Claude: [调用 paper_reading_status(
+            paper_ids=["arxiv:2603.04567"],
+            status="reading"
+        )]
+
+        ✅ 已标记为"阅读中"。
+        阅读进度：待读 5 | **阅读中 3** | 已读 8 | 重要 3
+        reading-list.md 已更新。
 ```
 
 ---
@@ -914,6 +964,175 @@ Claude: [调用 paper_download(paper_ids=[15 篇 IDs])]
 
 ---
 
+## Workspace 功能
+
+v02 引入 **Workspace Layer**——`.paper-agent/` 目录下的一组 markdown 文件，
+作为你和 AI 之间的"共享工作记忆"。所有操作自动记录，打开文件夹就能看到全貌。
+
+### 阅读状态管理
+
+```
+You: 把今天推荐的前 3 篇标记为"待读"
+
+Claude: [调用 paper_reading_status(
+            paper_ids=["e3f2a1b9c0d4", "a1b2c3d4e5f6", "f7e8d9c0b1a2"],
+            status="to_read"
+        )]
+
+        ✅ 3 篇已标记为"待读"。
+        - RL-Placer: Deep RL for Chip Macro Placement
+        - GNN-Driven Routing Optimization
+        - Transformer-Based Placement Engine
+
+        阅读进度：**待读 8** | 阅读中 2 | 已读 8 | 重要 3
+        reading-list.md 已更新。
+
+You: 看看阅读进度
+
+Claude: [调用 paper_reading_stats()]
+
+        📊 **阅读进度**
+
+        | 状态 | 数量 | 最近论文 |
+        |------|------|---------|
+        | 重要 | 3 | RL-Placer, ChipFormer, MaskPlace |
+        | 阅读中 | 2 | Transformer-Based Placement, AttentionPlacer |
+        | 待读 | 8 | GNN-Driven Routing, ... |
+        | 已读 | 8 | ... |
+
+        要看哪个类别的详细列表？
+
+You: 那篇 RL-Placer 我读完了，标记一下
+
+Claude: [调用 paper_reading_status(
+            paper_ids=["e3f2a1b9c0d4"],
+            status="read"
+        )]
+
+        ✅ RL-Placer 已标记为"已读"。待读 8 | 阅读中 2 | **已读 9** | 重要 3
+```
+
+### 论文分组
+
+```
+You: 创建一个 "rl-placement" 分组，把 RL 相关的论文放进去
+
+Claude: [调用 paper_group_create(
+            name="rl-placement",
+            description="RL-based chip placement methods"
+        )]
+
+        ✅ 分组 "rl-placement" 已创建。
+        文件：`.paper-agent/collections/rl-placement.md`
+
+        要加哪些论文进去？
+
+You: 把之前对比的那 4 篇加进去
+
+Claude: [调用 paper_group_add(
+            name="rl-placement",
+            paper_ids=["e3f2a1b9c0d4", "a1b2c3d4e5f6",
+                       "f7e8d9c0b1a2", "b3c4d5e6f7a8"]
+        )]
+
+        ✅ 4 篇已添加到分组 "rl-placement"（共 4 篇）。
+        collections/rl-placement.md 已更新。
+
+You: 看看有哪些分组
+
+Claude: [调用 paper_group_list()]
+
+        📂 **论文分组**
+
+        | 分组名 | 描述 | 论文数 |
+        |--------|------|--------|
+        | rl-placement | RL-based chip placement methods | 4 |
+        | timing-opt | Timing optimization papers | 6 |
+
+        要查看某个分组的详情？
+```
+
+### 引用链追踪
+
+```
+You: 看看 RL-Placer 这篇论文引用了什么，被谁引用了
+
+Claude: [调用 paper_citations(
+            paper_id="e3f2a1b9c0d4",
+            direction="both",
+            limit=15,
+            trace_name="rl-placement-chain"
+        )]
+
+        🔗 **RL-Placer 引用关系**
+
+        ### 引用的论文（backward, 15 篇）
+        1. Google's Chip Placement with RL (Nature 2021) — 开创性工作
+        2. DREAMPlace: Deep Learning Toolkit for VLSI Placement
+        3. ...
+
+        ### 被引用（forward, 8 篇）
+        1. ChipFormer: Transferable Chip Placement (ICML 2023)
+        2. MaskPlace: Fast Chip Placement via RL (NeurIPS 2022)
+        3. ...
+
+        新发现的论文已自动保存到本地库（23 篇新增）。
+        引用链记录：`.paper-agent/citation-traces/rl-placement-chain.md`
+
+        要深入看某篇吗？或者继续追踪某篇的引用？
+
+You: 追踪一下 Google 那篇
+
+Claude: [调用 paper_citations(
+            paper_id="(Google 论文 ID)",
+            direction="references",
+            limit=10,
+            trace_name="rl-placement-chain"
+        )]
+
+        Google Chip Placement 引用了 10 篇关键论文：
+        ...
+
+        引用链追踪已追加到 `citation-traces/rl-placement-chain.md`。
+```
+
+### 跨会话上下文恢复
+
+每次新会话开始时，AI 自动读取 workspace 文件恢复上下文：
+
+```
+（新会话开始）
+
+You: 我昨天在看什么来着？
+
+Claude: [调用 paper_workspace_context()]
+
+        📋 **你最近的研究活动**
+
+        **昨天 (3/13)**
+        - 09:30 搜索了 "RL placement" 论文 (12 篇)
+        - 10:15 深度分析了 RL-Placer
+        - 14:00 对比了 4 篇 RL placement 论文
+        - 15:30 查了 RL-Placer 的引用链 (23 篇新增)
+        - 16:00 创建分组 "rl-placement" (4 篇)
+
+        **阅读进度**
+        - 待读 8 | 阅读中 2 | 已读 9 | 重要 3
+
+        **活跃分组**
+        - rl-placement (4 篇)
+        - timing-opt (6 篇)
+
+        **引用链**
+        - rl-placement-chain
+
+        要继续昨天的工作吗？
+
+You: 继续看引用链
+```
+
+---
+
 ## 自然语言交互
 
 除了 slash 命令，你也可以用自然语言。Claude Code 会自动识别论文相关意图并调用 MCP 工具。
@@ -1009,19 +1228,25 @@ Claude: [调用 paper_search_online("LoRA fine-tuning EDA circuit design")]
 
 ```
 08:00  /start-my-day
+       → workspace_context 恢复昨日上下文
        → 三源并行采集 47 篇新论文 → 推荐 5 篇高置信
 
-08:10  "第 2 篇看看"
-       → 展示论文详情
+08:10  "第 2 篇不错，标记待读；第 1 篇很重要"
+       → paper_reading_status → reading-list.md 更新
 
 08:15  /paper-analyze 2603.04567
-       → 深度分析 → 保存到 notes/
+       → 深度分析 → paper_note_add 保存笔记
+       → .paper-agent/notes/ 自动更新
 
 10:30  （写代码中）"这个 GNN aggregation 有论文讲过吗？"
        → paper_search(diverse=True) → 扩展搜索 → 找到 8 篇
 
+11:00  "看看这篇引用了什么"
+       → paper_citations → 引用链 → citation-traces/ 更新
+
 14:00  /paper-compare
        → 选 4 篇 RL placement 论文 → 对比方法和结果
+       → paper_group_create("rl-placement") → 创建分组
 
 15:00  /paper-survey AI for Chip Placement
        → paper_search_batch 多方向搜索
@@ -1034,6 +1259,12 @@ Claude: [调用 paper_search_online("LoRA fine-tuning EDA circuit design")]
 
 17:00  "帮我把 survey 里的 15 篇 PDF 全下载了"
        → paper_download(15 篇 IDs) → papers/ 目录
+
+-- 次日 --
+
+08:00  /start-my-day
+       → "昨天你分析了 RL-Placer，对比了 4 篇，创建了分组..."
+       → 无缝恢复上下文
 ```
 
 ---
@@ -1057,11 +1288,13 @@ Claude Code 理解意图 → 确认/澄清
 ```
 
 Claude Code 在每个环节：
+- **记忆**：每次操作自动写入 research-journal.md，新会话自动恢复上下文
 - **理解**：把模糊的描述转化为精确的查询
 - **确认**：不确定时主动追问
 - **建议**：结果少时自动建议 diverse 搜索或在线搜索
 - **批量**：多方向任务用 `paper_search_batch` 一次搞定，不逐个调用
 - **呈现**：compact 格式精简输出，避免信息过载
+- **持久化**：笔记、分组、引用链自动保存为 markdown 文件，人可读
 - **引导**：每步结束后建议下一步
 - **修改**：结果不满意时支持迭代
 
@@ -1108,13 +1341,18 @@ Claude: LLM 评分失败：API key invalid
 | 查论文 | `paper-agent search "query"` | "帮我查 xxx 论文" |
 | 关键词扩展 | `search "query" --diverse` | AI 自动建议 diverse 搜索 |
 | 在线搜索 | 不支持 | `paper_search_online`（arXiv + S2 并行） |
-| 每日推荐 | `collect -d 1 && digest`（两步） | `/start-my-day`（一步） |
+| 每日推荐 | `collect -d 1 && digest`（两步） | `/start-my-day`（一步 + 上下文恢复） |
 | 多源采集 | `collect`（arXiv + DBLP + S2 并行） | `/paper-collect`（同上 + 进度日志） |
 | 分析论文 | `show <id>`（看原始数据） | `/paper-analyze`（结构化中文笔记） |
-| 保存笔记 | 自己复制粘贴 | "保存到 notes/xxx.md" |
+| 保存笔记 | 自己复制粘贴 | `paper_note_add`（自动保存到 DB + 文件） |
+| 阅读状态 | 不支持 | `paper_reading_status`（待读/阅读中/已读/重要） |
+| 论文分组 | 不支持 | `paper_group_create/add`（分组 + 文件同步） |
+| 引用链 | 不支持 | `paper_citations`（S2 API + 自动入库 + 文件记录） |
+| 跨会话记忆 | 不支持 | `paper_workspace_context`（自动恢复上下文） |
 | 多篇对比 | 不支持 | `/paper-compare`（对比表格 + 分析） |
 | 批量搜索 | 不支持 | `paper_search_batch`（N 个方向一次搞定） |
 | 写综述 | 不支持 | `/paper-survey`（全流程引导） |
 | 批量下载 | 不支持 | `/paper-download`（一次传多个 ID） |
 | 上下文 | 需要在终端和 IDE 间切换 | AI 知道你在写什么代码 |
+| 研究全貌 | 只能通过命令查 | 打开 `.paper-agent/` 目录即见 |
 | 语言 | 英文命令 + 英文输出 | 自然语言输入 + 中文输出 |
