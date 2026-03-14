@@ -27,20 +27,51 @@ plugin/
     │   └── plugin.json              ← 插件清单
     ├── .mcp.json                    ← MCP 服务器配置模板
     ├── commands/                    ← Slash 命令定义
-    │   ├── start-my-day.md          ← /start-my-day  每日推荐
-    │   ├── paper-search.md          ← /paper-search   搜索论文（支持关键词扩展）
-    │   ├── paper-collect.md         ← /paper-collect   多源并行采集（arXiv + DBLP + S2）
-    │   ├── paper-analyze.md         ← /paper-analyze   单篇深度分析
-    │   ├── paper-compare.md         ← /paper-compare   多篇对比
-    │   ├── paper-survey.md          ← /paper-survey    文献综述（支持多方向）
-    │   ├── paper-download.md        ← /paper-download  批量下载 PDF
-    │   └── paper-setup.md           ← /paper-setup     初始化配置
-    └── skills/
-        └── paper-intelligence/
+    │   ├── start-my-day.md          ← /start-my-day
+    │   ├── paper-search.md          ← /paper-search
+    │   ├── paper-collect.md         ← /paper-collect
+    │   ├── paper-analyze.md         ← /paper-analyze
+    │   ├── paper-compare.md         ← /paper-compare
+    │   ├── paper-survey.md          ← /paper-survey
+    │   ├── paper-download.md        ← /paper-download
+    │   └── paper-setup.md           ← /paper-setup
+    └── skills/                      ← 工作流 Skills（AI 行为编排）
+        ├── paper-intelligence/      ← 路由 Skill：根据意图分发到具体工作流
+        │   └── SKILL.md
+        ├── daily-reading/           ← 每日开工：上下文恢复→采集→推荐→标记
+        │   ├── SKILL.md
+        │   └── references/daily-digest-template.md
+        ├── deep-dive/               ← 论文深度分析→笔记→状态→延伸
+        │   ├── SKILL.md
+        │   └── references/analysis-template.md
+        ├── literature-survey/       ← 文献综述：关键词→搜索→筛选→综述→导出
+        │   ├── SKILL.md
+        │   └── references/survey-template.md
+        ├── citation-explore/        ← 引用链探索：双向引用→递归追踪→整理
+        │   ├── SKILL.md
+        │   └── references/citation-map-template.md
+        ├── paper-triage/            ← 论文筛选分流：批量评估→分流→标记
+        │   ├── SKILL.md
+        │   └── references/triage-template.md
+        └── research-insight/        ← 研究趋势洞察：趋势分析→洞察报告
             ├── SKILL.md
-            └── references/
-                └── analysis-template.md
+            └── references/insight-template.md
 ```
+
+## 工作流 Skills
+
+Skills 是预编排的研究工作流，AI 会在关键节点与用户交互，最终产出结构化交付件。
+
+| Skill | 触发词 | 交付件 | 默认路径 |
+|-------|--------|--------|---------|
+| **daily-reading** | "每日开工"、"start my day" | 每日阅读摘要 | `daily/{date}.md` |
+| **deep-dive** | "分析这篇"、"展开讲讲" | 论文分析笔记 | `.paper-agent/notes/{id}.md` |
+| **literature-survey** | "综述"、"survey" | 综述报告 + BibTeX | `survey/{topic}.md` |
+| **citation-explore** | "引用链"、"citations" | 引用图谱报告 | `.paper-agent/citation-traces/{name}.md` |
+| **paper-triage** | "帮我筛一下"、"哪些值得读" | 筛选决策表 | `triage/{topic}-{date}.md` |
+| **research-insight** | "趋势"、"洞察" | 趋势洞察报告 | `insight/{topic}-{date}.md` |
+
+每个 Skill 都有：交互检查点（🗣️ 必须问用户）、交付件模板、Skill 间跳转。
 
 ## 命令速查
 
