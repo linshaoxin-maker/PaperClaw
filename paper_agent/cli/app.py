@@ -548,36 +548,72 @@ def doctor(
     except Exception:
         checks.append(("论文库", False, "无法连接"))
 
-    # 5. Claude Code config
+    # 5. Claude Code config — check project-level first, fall back to global
+    claude_home = Path.home() / ".claude"
+    claude_project_found = False
+    claude_global_found = False
+
     claude_mcp = cwd / ".mcp.json"
     claude_md = cwd / "CLAUDE.md"
     claude_cmds = cwd / ".claude" / "commands"
     claude_skills = cwd / ".claude" / "skills"
     if claude_mcp.exists() and claude_md.exists():
-        parts = []
+        parts = ["project"]
         if claude_cmds.exists():
             cmd_count = len(list(claude_cmds.glob("*.md")))
             parts.append(f"{cmd_count} commands")
         if claude_skills.exists():
             skill_count = len(list(claude_skills.glob("*/SKILL.md")))
             parts.append(f"{skill_count} skills")
-        checks.append(("Claude Code 集成", True, ", ".join(parts) if parts else "已配置"))
-    elif claude_mcp.exists():
-        checks.append(("Claude Code 集成", False, "缺少 CLAUDE.md → 重新运行 paper-agent setup claude-code"))
-    else:
-        checks.append(("Claude Code 集成", False, "未配置（当前目录） → 运行 paper-agent setup claude-code"))
+        checks.append(("Claude Code 集成", True, ", ".join(parts)))
+        claude_project_found = True
 
-    # 6. Cursor config
+    if not claude_project_found:
+        g_cmds = claude_home / "commands"
+        g_skills = claude_home / "skills"
+        g_md = claude_home / "CLAUDE.md"
+        if g_cmds.exists() or g_skills.exists() or g_md.exists():
+            parts = ["global (~/.claude)"]
+            if g_cmds.exists():
+                cmd_count = len(list(g_cmds.glob("*.md")))
+                parts.append(f"{cmd_count} commands")
+            if g_skills.exists():
+                skill_count = len(list(g_skills.glob("*/SKILL.md")))
+                parts.append(f"{skill_count} skills")
+            checks.append(("Claude Code 集成", True, ", ".join(parts)))
+            claude_global_found = True
+
+    if not claude_project_found and not claude_global_found:
+        if claude_mcp.exists():
+            checks.append(("Claude Code 集成", False, "缺少 CLAUDE.md → 重新运行 paper-agent setup claude-code"))
+        else:
+            checks.append(("Claude Code 集成", False, "未配置 → 运行 paper-agent setup claude-code (--scope project 或 global)"))
+
+    # 6. Cursor config — check project-level first, fall back to global
+    cursor_home = Path.home() / ".cursor"
+    cursor_project_found = False
+
     cursor_mcp = cwd / ".cursor" / "mcp.json"
     cursor_skills = cwd / ".cursor" / "skills"
     if cursor_mcp.exists():
-        parts = []
+        parts = ["project"]
         if cursor_skills.exists():
             skill_count = len(list(cursor_skills.glob("*/SKILL.md")))
             parts.append(f"{skill_count} skills")
-        checks.append(("Cursor 集成", True, ", ".join(parts) if parts else "已配置"))
-    else:
-        checks.append(("Cursor 集成", False, "未配置（当前目录） → 运行 paper-agent setup cursor"))
+        checks.append(("Cursor 集成", True, ", ".join(parts)))
+        cursor_project_found = True
+
+    if not cursor_project_found:
+        g_mcp = cursor_home / "mcp.json"
+        g_skills = cursor_home / "skills"
+        if g_mcp.exists():
+            parts = ["global (~/.cursor)"]
+            if g_skills.exists():
+                skill_count = len(list(g_skills.glob("*/SKILL.md")))
+                parts.append(f"{skill_count} skills")
+            checks.append(("Cursor 集成", True, ", ".join(parts)))
+        else:
+            checks.append(("Cursor 集成", False, "未配置 → 运行 paper-agent setup cursor (--scope project 或 global)"))
 
     # 7. Workspace
     ws_dir = cwd / ".paper-agent"

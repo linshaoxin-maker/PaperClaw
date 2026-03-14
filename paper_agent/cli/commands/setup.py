@@ -555,6 +555,7 @@ _CLAUDE_COMMANDS: dict[str, str] = {
 description: "Paper Agent — unified entry point for all research paper workflows"
 allowed-tools: [
   "mcp__paper-agent__paper_profile",
+  "mcp__paper-agent__paper_profile_update",
   "mcp__paper-agent__paper_stats",
   "mcp__paper-agent__paper_workspace_context",
   "mcp__paper-agent__paper_morning_brief",
@@ -562,13 +563,23 @@ allowed-tools: [
   "mcp__paper-agent__paper_auto_triage",
   "mcp__paper-agent__paper_search",
   "mcp__paper-agent__paper_show",
+  "mcp__paper-agent__paper_batch_show",
   "mcp__paper-agent__paper_citation_trace",
   "mcp__paper-agent__paper_trend_data",
   "mcp__paper-agent__paper_compare",
   "mcp__paper-agent__paper_note_add",
   "mcp__paper-agent__paper_reading_status",
+  "mcp__paper-agent__paper_collect",
+  "mcp__paper-agent__paper_download",
+  "mcp__paper-agent__paper_find_and_download",
+  "mcp__paper-agent__paper_export",
+  "mcp__paper-agent__paper_group_add",
+  "mcp__paper-agent__paper_sources_list",
+  "mcp__paper-agent__paper_sources_enable",
+  "mcp__paper-agent__paper_templates_list",
   "mcp__paper-agent__paper_health",
-  "Read"
+  "Read",
+  "Write"
 ]
 ---
 
