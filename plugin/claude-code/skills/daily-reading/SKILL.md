@@ -27,7 +27,9 @@ Write the digest to `daily/{YYYY-MM-DD}.md` using the daily-digest-template.
 ## Workspace behavior
 
 The `paper_morning_brief` response includes a `mode` field:
-- `"workspace"`: top picks were auto-marked as `to_read`. Mention this.
+- `"workspace"`: top picks were auto-marked as `to_read`.
+  - If `auto_marked` > 0 AND this is the user's first time seeing auto-marking (no prior reading stats), explain: "（首次自动标记）我把 N 篇高相关论文自动标记为'待读'，方便你追踪阅读进度。这个行为可以通过切换到 lightweight 模式关闭。"
+  - On subsequent uses, just briefly mention: "已自动标记 N 篇为待读。"
 - `"lightweight"`: just present the digest, no status talk.
 
 ## Rules

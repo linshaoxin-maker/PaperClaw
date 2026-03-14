@@ -455,12 +455,15 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             status: One of 'to_read', 'reading', 'read', 'important'.
 
         Returns:
-            JSON object with update count and reading stats.
+            JSON object with update count, reading stats, and first_use flag.
         """
         _ensure_workspace()
         valid = {"to_read", "reading", "read", "important"}
         if status not in valid:
             return json.dumps({"error": f"Invalid status '{status}'. Use: {sorted(valid)}"})
+
+        existing_stats = ctx.storage.get_reading_stats()
+        first_use = sum(existing_stats.values()) == 0
 
         resolved_ids: list[str] = []
         not_found: list[str] = []
@@ -483,6 +486,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             "status": "ok",
             "updated": updated,
             "reading_stats": stats,
+            "first_use": first_use,
         }
         if not_found:
             result["not_found"] = not_found
@@ -521,12 +525,15 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                      One of 'to_read', 'reading', 'read', 'important', or None.
 
         Returns:
-            JSON object with note ID and file path.
+            JSON object with note ID, file path, and first_use flag.
         """
         _ensure_workspace()
         paper = _resolve_paper(paper_id)
         if not paper:
             return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        notes_dir = ctx.workspace_manager._root / "notes"
+        first_use = not notes_dir.exists() or not any(notes_dir.iterdir())
 
         note_id = uuid.uuid4().hex[:12]
         ctx.storage.save_note(note_id, paper.id, content, source)
@@ -541,6 +548,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             "note_id": note_id,
             "paper_id": paper.id,
             "file": str(file_path) if file_path else None,
+            "first_use": first_use,
         }
 
         if mark_as:
@@ -1711,4 +1719,98 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             "directions": directions,
             "total_papers": len(papers_in_range),
             "top_venues": [{"name": v, "count": c} for v, c in venue_counter.most_common(10)],
+        }, ensure_ascii=False, default=str)
+
+    # ── Health Check (in-IDE diagnostics) ──────────────────────────────
+
+    @mcp.tool()
+    def paper_health() -> str:
+        """Run a health check on paper-agent setup. Verifies LLM config, research
+        profile, paper library, and workspace. Use this when something seems broken
+        or when the user asks to diagnose their setup.
+
+        Returns:
+            JSON with per-check pass/fail results and fix suggestions.
+        """
+        import shutil
+        import sys as _sys
+
+        checks: list[dict[str, Any]] = []
+
+        # 1. LLM config
+        try:
+            from paper_agent.app.config_manager import ConfigManager
+            cm = ConfigManager(None)
+            if cm.is_initialized():
+                checks.append({"name": "llm_config", "pass": True, "detail": "已初始化"})
+            else:
+                checks.append({"name": "llm_config", "pass": False,
+                                "detail": "未初始化",
+                                "fix": "在终端运行 paper-agent init"})
+        except Exception as e:
+            checks.append({"name": "llm_config", "pass": False,
+                            "detail": str(e),
+                            "fix": "在终端运行 paper-agent init"})
+
+        # 2. MCP executable
+        mcp_bin = shutil.which("paper-agent-mcp")
+        if mcp_bin:
+            checks.append({"name": "mcp_binary", "pass": True, "detail": mcp_bin})
+        else:
+            venv_bin = Path(_sys.executable).parent / "paper-agent-mcp"
+            checks.append({"name": "mcp_binary", "pass": True,
+                            "detail": str(venv_bin) if venv_bin.exists()
+                            else f"{_sys.executable} -m paper_agent.mcp (fallback)"})
+
+        # 3. Research profile
+        try:
+            cfg = ctx.require_initialized()
+            if cfg.topics:
+                checks.append({"name": "profile", "pass": True,
+                                "detail": f"{len(cfg.topics)} topics, {len(cfg.keywords)} keywords"})
+            else:
+                checks.append({"name": "profile", "pass": False,
+                                "detail": "未配置研究方向",
+                                "fix": "告诉我你的研究方向，或运行 /paper-setup"})
+        except Exception:
+            checks.append({"name": "profile", "pass": False,
+                            "detail": "需要先完成 init",
+                            "fix": "在终端运行 paper-agent init"})
+
+        # 4. Paper library
+        try:
+            total = ctx.storage.count_papers()
+            if total > 0:
+                checks.append({"name": "library", "pass": True, "detail": f"{total} 篇论文"})
+            else:
+                checks.append({"name": "library", "pass": False,
+                                "detail": "论文库为空",
+                                "fix": "运行 /start-my-day 或 /paper-collect 采集论文"})
+        except Exception:
+            checks.append({"name": "library", "pass": False,
+                            "detail": "无法连接论文库",
+                            "fix": "检查数据库配置"})
+
+        # 5. Workspace
+        try:
+            ws_status = ctx.workspace_manager.status()
+            checks.append({"name": "workspace", "pass": True,
+                            "detail": f"已初始化 — {ws_status.get('total_notes', 0)} 笔记"})
+        except Exception:
+            checks.append({"name": "workspace", "pass": False,
+                            "detail": "工作区未初始化",
+                            "fix": "运行 paper-agent setup claude-code 或 paper-agent setup cursor"})
+
+        all_ok = all(c["pass"] for c in checks)
+        suggestion = None
+        if not all_ok:
+            failed = [c for c in checks if not c["pass"]]
+            suggestion = "需要修复: " + "; ".join(
+                f"{c['name']} — {c.get('fix', c['detail'])}" for c in failed
+            )
+
+        return json.dumps({
+            "status": "ok" if all_ok else "issues_found",
+            "checks": checks,
+            "suggestion": suggestion,
         }, ensure_ascii=False, default=str)

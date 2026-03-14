@@ -27,6 +27,9 @@ When generating the analysis, use tables for structured data:
 
 Auto-track: call `paper_note_add` to save note to workspace (this is internal tracking, not file export).
 
+If `first_use` is true in the response, tell the user: "（首次自动记录）我把分析笔记保存到了工作区（.paper-agent/），方便以后查阅。如果不需要自动记录，告诉我'不要记录'就行。"
+If `first_use` is false, just briefly say: "已记录到工作区。"
+
 **[FORK]** Present options based on mode:
 - workspace: "已自动记录到工作区。要导出分析笔记为文件？看引用链？还是先这样？"
 - lightweight: "要导出分析笔记为文件？看引用链？还是先这样？"

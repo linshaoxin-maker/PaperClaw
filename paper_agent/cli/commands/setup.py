@@ -59,6 +59,36 @@ def _merge_mcp_json(path: Path, cmd: str, args: list[str]) -> None:
     path.write_text(json.dumps(existing, indent=2, ensure_ascii=False) + "\n")
 
 
+_PA_MARKER_START = "<!-- paper-agent:start -->"
+_PA_MARKER_END = "<!-- paper-agent:end -->"
+
+
+def _merge_claude_md(path: Path, content: str) -> None:
+    """Write paper-agent section into CLAUDE.md without clobbering user content.
+
+    - File doesn't exist → create with markers
+    - File has markers → replace only the section between them
+    - File exists, no markers → append section at the end
+    """
+    block = f"{_PA_MARKER_START}\n{content}\n{_PA_MARKER_END}\n"
+
+    if not path.exists():
+        path.write_text(block)
+        return
+
+    existing = path.read_text()
+    if _PA_MARKER_START in existing and _PA_MARKER_END in existing:
+        start = existing.index(_PA_MARKER_START)
+        end = existing.index(_PA_MARKER_END) + len(_PA_MARKER_END)
+        # consume trailing newline if present
+        if end < len(existing) and existing[end] == "\n":
+            end += 1
+        path.write_text(existing[:start] + block + existing[end:])
+    else:
+        separator = "" if existing.endswith("\n") else "\n"
+        path.write_text(existing + separator + "\n" + block)
+
+
 def _init_workspace(target: Path) -> None:
     """Create .paper-agent/ workspace directory in the project."""
     from paper_agent.services.workspace_manager import WorkspaceManager
@@ -232,7 +262,7 @@ def _setup_claude_project(target: Path, cmd: str, args: list[str]) -> None:
     print_success(f"Skills → {skills_dir} ({count} workflow skills)")
 
     claude_md = target / "CLAUDE.md"
-    claude_md.write_text(_CLAUDE_MD)
+    _merge_claude_md(claude_md, _CLAUDE_MD)
     print_success(f"CLAUDE.md → {claude_md}")
 
     _init_workspace(target)
@@ -272,9 +302,30 @@ def _setup_claude_global(cmd: str, args: list[str]) -> None:
         print_error("claude mcp add 超时。请手动运行上述命令。")
         raise typer.Exit(1)
 
-    console.print("\n[bold]下一步：[/bold]")
+    claude_home = Path.home() / ".claude"
+    claude_home.mkdir(parents=True, exist_ok=True)
+
+    commands_dir = claude_home / "commands"
+    commands_dir.mkdir(parents=True, exist_ok=True)
+    for name, content in _CLAUDE_COMMANDS.items():
+        (commands_dir / name).write_text(content)
+    print_success(f"Commands → {commands_dir} ({len(_CLAUDE_COMMANDS)} commands)")
+
+    skills_dir = claude_home / "skills"
+    count = _write_claude_skills(skills_dir)
+    print_success(f"Skills → {skills_dir} ({count} workflow skills)")
+
+    claude_md = claude_home / "CLAUDE.md"
+    _merge_claude_md(claude_md, _CLAUDE_MD)
+    print_success(f"CLAUDE.md → {claude_md}")
+
+    console.print("\n[bold green]✅ 安装完成！[/bold green]")
+    console.print("\n[bold]自检：[/bold]")
+    console.print("  [cyan]paper-agent doctor[/cyan]  ← 检查安装是否完整")
+    console.print("\n[bold]开始使用：[/bold]")
     console.print("  1. 在任意目录运行 [cyan]claude[/cyan]")
-    console.print("  2. 直接说 [cyan]\"搜索论文 transformer\"[/cyan] 使用 paper-agent 工具\n")
+    console.print("  2. 输入 [cyan]/paper[/cyan] 查看所有功能")
+    console.print("  3. 或直接说 [cyan]\"帮我找 transformer 相关的论文\"[/cyan]\n")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -393,6 +444,9 @@ This project uses **paper-agent** MCP server for research paper intelligence.
 - `paper_sources_list()` / `paper_sources_enable(enable, disable)` — source management
 - `paper_templates_list()` — research area templates
 
+### Diagnostics
+- `paper_health()` — in-IDE health check (LLM config, profile, library, workspace)
+
 ## Interaction Rules
 
 1. **Context carry-over** (CRITICAL): When the user's request relates to papers already found/discussed in this conversation:
@@ -455,7 +509,7 @@ At session start, silently call `paper_profile()`:
 - **Profile exists, empty library** (check `paper_stats()`): Say "研究方向已配好，论文库还是空的。要我帮你采集最近一周的论文吗？"
 - **Profile + library exist**: Normal operation. If user seems unsure what to do, suggest `/paper` to see all options.
 
-Note: The user's terminal setup flow is: `paper-agent init` (LLM config) → `paper-agent setup claude-code` (install to project) → start Claude Code. If MCP fails, tell the user to run `paper-agent doctor` in terminal to diagnose.
+Note: The user's terminal setup flow is: `paper-agent init` (LLM config) → `paper-agent setup claude-code` (install to project) → start Claude Code. If something seems broken, call `paper_health()` to diagnose within this conversation (no need to leave Claude Code). For deeper terminal-level checks, the user can run `paper-agent doctor`.
 
 ## Error Handling
 
@@ -502,66 +556,77 @@ description: "Paper Agent — unified entry point for all research paper workflo
 allowed-tools: [
   "mcp__paper-agent__paper_profile",
   "mcp__paper-agent__paper_stats",
-  "mcp__paper-agent__paper_workspace_context"
+  "mcp__paper-agent__paper_workspace_context",
+  "mcp__paper-agent__paper_morning_brief",
+  "mcp__paper-agent__paper_quick_scan",
+  "mcp__paper-agent__paper_auto_triage",
+  "mcp__paper-agent__paper_search",
+  "mcp__paper-agent__paper_show",
+  "mcp__paper-agent__paper_citation_trace",
+  "mcp__paper-agent__paper_trend_data",
+  "mcp__paper-agent__paper_compare",
+  "mcp__paper-agent__paper_note_add",
+  "mcp__paper-agent__paper_reading_status",
+  "mcp__paper-agent__paper_health",
+  "Read"
 ]
 ---
 
 # Paper Agent
 
-Unified entry point — help the researcher decide what to do.
+Unified entry point — understand user state, recommend actions, and execute in the same turn.
 
 ## Process
 
 1. Silently call `paper_workspace_context()` + `paper_stats()` to understand the current state
-2. Present a personalized menu based on state:
+2. Based on state, show **top 3 recommended actions** (not the full command list):
 
-   **Paper Agent** — 你的研究助手
+   **New user** (no profile):
+   > 看起来你是第一次用 Paper Agent！我先帮你设置研究方向，这样才能给你个性化的推荐。
+   > 告诉我你的研究领域和关注的方向？
 
-   当前状态：[库中 N 篇论文 | 待读 X | 阅读中 Y]
+   **Empty library** (profile exists, 0 papers):
+   > 研究方向已配好，论文库还是空的。建议：
+   > 1. **今日推荐** — 收集并推荐最新论文（`/start-my-day`）
+   > 2. **搜索论文** — 搜一个你关注的主题
+   > 3. **采集论文** — 批量抓取最近一周的论文
 
-   ### Slash 命令
+   **Has unread papers** (to_read > 0):
+   > 你有 N 篇待读论文。建议：
+   > 1. **批量筛选** — 帮你自动分出最值得读的（`/paper-triage`）
+   > 2. **今日推荐** — 看看今天有没有新论文
+   > 3. **搜索论文** — 找特定方向的论文
+   >
+   > 输入"查看全部功能"展示完整命令列表。你也可以直接说你想做什么。
 
-   **研究工作流**
+   **Returning user** (has reading history):
+   > 当前状态：库中 N 篇论文 | 待读 X | 阅读中 Y
+   > 建议：
+   > 1. **今日推荐** — 看看有没有新论文
+   > 2. **继续阅读** — 你有 Y 篇正在读
+   > 3. **文献综述** / **趋势分析** — 对某个方向做系统梳理
+   >
+   > 输入"查看全部功能"展示完整命令列表。你也可以直接说你想做什么。
 
-   | # | 功能 | 说明 | 命令 |
-   |---|------|------|------|
-   | 1 | 每日推荐 | 收集今日论文 + 个性化推荐 | `/start-my-day` |
-   | 2 | 搜索论文 | 关键词搜索本地库 | `/paper-search <关键词>` |
-   | 3 | 深度分析 | 单篇论文结构化分析 | `/paper-analyze <ID>` |
-   | 4 | 文献综述 | 一个方向的论文梳理 | `/paper-survey <主题>` |
-   | 5 | 趋势分析 | 研究方向热度和趋势 | `/paper-insight <方向>` |
-   | 6 | 批量筛选 | 自动分流待读论文 | `/paper-triage` |
-   | 7 | 论文对比 | 多篇论文横向对比 | `/paper-compare` |
-   | 8 | 下载 PDF | 下载论文全文 | `/paper-download <ID>` |
+3. **If user says "查看全部功能" or "show all"**, then show the full table:
 
-   **配置与采集**
+   | # | 功能 | 说明 | 命令 / 说法 |
+   |---|------|------|------------|
+   | 1 | 每日推荐 | 收集 + 推荐 | `/start-my-day` 或 "今天看什么" |
+   | 2 | 搜索论文 | 关键词搜索 | `/paper-search` 或 "搜一下 X" |
+   | 3 | 深度分析 | 单篇分析 | `/paper-analyze` 或 "分析这篇" |
+   | 4 | 文献综述 | 方向梳理 | `/paper-survey` 或 "综述" |
+   | 5 | 趋势分析 | 热度趋势 | `/paper-insight` 或 "这个方向火不火" |
+   | 6 | 批量筛选 | 自动分流 | `/paper-triage` 或 "筛一下" |
+   | 7 | 论文对比 | 横向对比 | `/paper-compare` 或 "对比这几篇" |
+   | 8 | 下载 PDF | 论文全文 | `/paper-download` 或给 arXiv ID |
+   | 9 | 引用追踪 | 引用网络 | "引用链" 或 "谁引了这篇" |
+   | 10 | 配置方向 | 设定 profile | `/paper-setup` |
+   | 11 | 采集论文 | 批量抓取 | `/paper-collect` |
+   | 12 | 健康检查 | 诊断安装 | "检查一下" 或 call `paper_health` |
 
-   | # | 功能 | 说明 | 命令 |
-   |---|------|------|------|
-   | 9 | 配置研究方向 | 对话式设定 topics / keywords / sources | `/paper-setup` |
-   | 10 | 采集论文 | 三源并行抓取 + LLM 评分 | `/paper-collect [天数]` |
-
-   ### 自然语言触发
-
-   不用记命令，直接说需求，我会自动路由到对应的工作流：
-
-   | 你说的话 | 触发的能力 | 背后的 Skill / 工具 |
-   |---------|----------|-------------------|
-   | "今天看什么" / "start my day" | 每日推荐 | `paper_morning_brief` 一步完成 |
-   | "搜一下 GNN placement" | 搜索论文 | `paper_search` / `paper_quick_scan` |
-   | "分析这篇" / 给出 arXiv ID | 深度分析 | deep-dive skill |
-   | "这个方向有什么工作" / "综述" | 文献综述 | literature-survey skill |
-   | "这个方向火不火" / "趋势" | 趋势分析 | research-insight skill |
-   | "筛一下" / "哪些值得看" | 批量筛选 | `paper_auto_triage` 一步完成 |
-   | "引用链" / "谁引了这篇" | 引用追踪 | `paper_citation_trace` 一步完成 |
-   | "帮我找 Attention Is All You Need" | 精确查找 + 下载 | `paper_find_and_download` |
-   | "收集论文" / "配置方向" | 采集 / 设置 | `/paper-collect` / `/paper-setup` |
-
-   直接告诉我你想做什么，或输入上面的命令。
-
-3. If user hasn't configured profile yet, skip the menu and guide through setup first
-4. If library is empty, suggest starting with `/start-my-day` or `/paper-collect`
-5. Route to the selected workflow — for skills, read the corresponding `.claude/skills/<name>/SKILL.md`
+4. **If user directly states intent** (e.g. "今天看什么", "搜 GNN 的论文"), skip the menu and **execute immediately** using the tools above. This is the key difference from a menu — /paper can route AND execute.
+5. For multi-step workflows, read `.claude/skills/<name>/SKILL.md` for the full flow.
 """,
     "start-my-day.md": """\
 ---
