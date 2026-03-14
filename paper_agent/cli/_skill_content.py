@@ -36,6 +36,12 @@ Call `paper_workspace_context()` first. Read the `mode` field:
 
 ## Interaction Rules
 
+- **Context carry-over**: When the user's request relates to papers already in this conversation:
+  - **Explicit reference** ("根据已有的", "用刚才的", "基于这些"): Use those papers directly. No confirmation, no re-search.
+  - **Ambiguous** (same-topic request, but no explicit reference): ASK "刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+  - **New topic**: Treat as new search, ignore context.
+  - **No context**: Search directly.
+- **Intent-driven**: When the user's intent is clear, skip intermediate steps and go straight to results. Don't ask clarifying questions unless intent is genuinely ambiguous.
 - When routing to a tool directly (morning_brief, auto_triage, citation_trace), call it and present results. No extra questions.
 - When routing to a skill, follow that skill's fork-only checkpoints.
 - Never list more than 3 options. Prefer smart default + "或者？"
@@ -92,9 +98,10 @@ description: Deep analysis of a single paper. Triggers on "分析这篇", "deep 
 
 ## Flow
 
-1. Call `paper_show(paper_id)` to get full paper details
-2. Call `paper_profile()` to understand user's research context
-3. **[FORK]** "全面分析，还是关注某个角度？（方法/实验/跟你的关联）"
+1. **Resolve paper_id from context**: If the user refers to a paper by index (e.g. "第3篇", "分析上面那篇"), resolve it from the papers discussed earlier in this conversation. If user gives an explicit paper ID or arXiv ID, use that directly.
+2. Call `paper_show(paper_id)` to get full paper details
+3. Call `paper_profile()` to understand user's research context
+4. **[FORK]** "全面分析，还是关注某个角度？（方法/实验/跟你的关联）"
 4. Generate analysis based on user's choice (or full analysis by default)
 
 ## Analysis Template (for AI generation)
@@ -139,10 +146,11 @@ description: Literature survey and review workflow. Triggers on "survey", "综�
 
 ## Flow
 
-1. Call `paper_quick_scan(topic, limit=20)` — searches local + online, deduped, ranked
-2. Present candidates as a numbered list with scores
-3. **[FORK]** "这些是初步候选，要纳入哪些？全部还是选几篇？"
-4. For selected papers, generate survey with structured tables:
+1. **Context carry-over**:
+   - **Explicit reference** ("根据已有的", "用刚才的", "基于这些写综述"): use those papers directly. Skip to step 3 — no candidate listing, no selection question.
+   - **Ambiguous** (same topic in context): ASK "刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+   - **No relevant context**: Call `paper_quick_scan(topic, limit=20)`, then show as table and **[FORK]** "全部纳入还是选几篇？"
+3. For selected/referenced papers, generate survey with structured tables:
    - **方法分类表**: | 类别 | 代表论文 | 核心思路 | 优势 | 局限 |
    - **实验对比表**: | 论文 | 数据集 | 指标1 | 指标2 | 亮点 |
    - **研究空白与趋势**: open problems, emerging directions
@@ -182,7 +190,8 @@ description: Citation chain exploration. Triggers on "引用链", "谁引了", "
 
 ## Flow
 
-1. Call `paper_citation_trace(paper_id, direction="both", max_depth=2)` — traces 2 levels automatically
+1. **Resolve paper_id from context**: If the user says "看引用链" without specifying a paper, use the paper currently being discussed in this conversation. If the user refers to a paper by index (e.g. "第2篇的引用链"), resolve from context. If explicit ID given, use that.
+2. Call `paper_citation_trace(paper_id, direction="both", max_depth=2)` — traces 2 levels automatically
 2. Present results as a tree + key nodes table:
 
    **引用树**: seed → level 1 → level 2 (text tree)
@@ -221,7 +230,10 @@ description: Batch paper screening and classification. Triggers on "筛一下", 
 
 ## Flow
 
-1. Call `paper_auto_triage(top_n=5)` — automatically classifies recent unread papers into important/to_read/skip using existing relevance scores
+1. **Context carry-over**:
+   - If user explicitly references existing papers ("筛一下刚才的", "帮我筛这些", "筛这些"): triage those directly → `paper_auto_triage(paper_ids=[...])`
+   - If papers in context but reference is ambiguous: ASK "要筛选刚才找到的这些论文？还是筛选库里最近的未读论文？"
+   - If no context → default to `paper_auto_triage(top_n=5)`
 2. Present the three buckets as tables:
 
    **⭐ 重要**: | # | 标题 | 评分 | 入选理由 |
@@ -274,7 +286,10 @@ description: Research trend analysis and insight generation. Triggers on "趋势
 
 ## Flow
 
-1. Call `paper_quick_scan(topic, limit=20)` for recent work landscape
+1. **Context carry-over**:
+   - If user explicitly references existing papers ("根据刚才的", "用这些做趋势分析"): use those papers directly as landscape
+   - If papers in context on the same topic but reference is ambiguous: ASK "刚才找到了 N 篇相关论文，基于这些做趋势分析？还是重新搜索？"
+   - If no context → call `paper_quick_scan(topic, limit=20)` directly
 2. Call `paper_trend_data(topic, years_back=3)` for publication counts and trends
 3. Present as structured tables:
 

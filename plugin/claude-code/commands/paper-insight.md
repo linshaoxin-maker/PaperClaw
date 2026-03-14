@@ -17,7 +17,10 @@ Quick trend analysis for a research topic.
 ## Process
 
 1. Parse $ARGUMENTS as the topic
-2. Call `paper_quick_scan(topic=$ARGUMENTS, limit=20)` for recent work
+2. **Context carry-over**:
+   - If user explicitly references existing papers ("根据刚才的", "用这些做趋势分析"): use those papers directly as landscape
+   - If papers in context on the same topic but reference is ambiguous: ASK "刚才找到了 N 篇相关论文，基于这些做趋势分析？还是重新搜索？"
+   - If no context → call `paper_quick_scan(topic=$ARGUMENTS, limit=20)` directly
 3. Call `paper_trend_data(topic=$ARGUMENTS, years_back=3)` for trend numbers
 4. Present as structured tables:
 

@@ -28,6 +28,12 @@ Call `paper_workspace_context()` first. Read the `mode` field:
 
 ## Interaction Rules
 
+- **Context carry-over**: When the user's request relates to papers already in this conversation:
+  - **Explicit reference** ("根据已有的", "用刚才的", "基于这些"): Use those papers directly. No confirmation, no re-search.
+  - **Ambiguous** (same-topic request, but no explicit reference): ASK "刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+  - **New topic**: Treat as new search, ignore context.
+  - **No context**: Search directly.
+- **Intent-driven**: When the user's intent is clear, skip intermediate steps and go straight to results. Don't ask clarifying questions unless intent is genuinely ambiguous.
 - When routing to a tool directly (morning_brief, auto_triage, citation_trace), call it and present results. No extra questions.
 - When routing to a skill, follow that skill's fork-only checkpoints.
 - Never list more than 3 options. Prefer smart default + "或者？"

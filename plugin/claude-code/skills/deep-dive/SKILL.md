@@ -7,9 +7,10 @@ description: Deep analysis of a single paper. Triggers on "分析这篇", "deep 
 
 ## Flow
 
-1. Call `paper_show(paper_id)` to get full paper details
-2. Call `paper_profile()` to understand user's research context
-3. **[FORK]** "全面分析，还是关注某个角度？（方法/实验/跟你的关联）"
+1. **Resolve paper_id from context**: If the user refers to a paper by index (e.g. "第3篇", "分析上面那篇"), resolve it from the papers discussed earlier in this conversation. If user gives an explicit paper ID or arXiv ID, use that directly.
+2. Call `paper_show(paper_id)` to get full paper details
+3. Call `paper_profile()` to understand user's research context
+4. **[FORK]** "全面分析，还是关注某个角度？（方法/实验/跟你的关联）"
 4. Generate analysis based on user's choice (or full analysis by default)
 
 ## Analysis Template (for AI generation)

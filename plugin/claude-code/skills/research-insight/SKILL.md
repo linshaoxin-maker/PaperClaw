@@ -7,7 +7,10 @@ description: Research trend analysis and insight generation. Triggers on "趋势
 
 ## Flow
 
-1. Call `paper_quick_scan(topic, limit=20)` for recent work landscape
+1. **Context carry-over**:
+   - If user explicitly references existing papers ("根据刚才的", "用这些做趋势分析"): use those papers directly as landscape
+   - If papers in context on the same topic but reference is ambiguous: ASK "刚才找到了 N 篇相关论文，基于这些做趋势分析？还是重新搜索？"
+   - If no context → call `paper_quick_scan(topic, limit=20)` directly
 2. Call `paper_trend_data(topic, years_back=3)` for publication counts and trends
 3. Present as structured tables:
 

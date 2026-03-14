@@ -7,7 +7,10 @@ description: Batch paper screening and classification. Triggers on "筛一下", 
 
 ## Flow
 
-1. Call `paper_auto_triage(top_n=5)` — automatically classifies recent unread papers into important/to_read/skip using existing relevance scores
+1. **Context carry-over**:
+   - If user explicitly references existing papers ("筛一下刚才的", "帮我筛这些", "筛这些"): triage those directly → `paper_auto_triage(paper_ids=[...])`
+   - If papers in context but reference is ambiguous: ASK "要筛选刚才找到的这些论文？还是筛选库里最近的未读论文？"
+   - If no context → default to `paper_auto_triage(top_n=5)`
 2. Present the three buckets as tables:
 
    **⭐ 重要**: | # | 标题 | 评分 | 入选理由 |

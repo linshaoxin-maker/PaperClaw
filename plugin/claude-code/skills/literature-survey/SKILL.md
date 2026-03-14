@@ -7,10 +7,11 @@ description: Literature survey and review workflow. Triggers on "survey", "综�
 
 ## Flow
 
-1. Call `paper_quick_scan(topic, limit=20)` — searches local + online, deduped, ranked
-2. Present candidates as a numbered list with scores
-3. **[FORK]** "这些是初步候选，要纳入哪些？全部还是选几篇？"
-4. For selected papers, generate survey with structured tables:
+1. **Context carry-over**:
+   - **Explicit reference** ("根据已有的", "用刚才的", "基于这些写综述"): use those papers directly. Skip to step 3 — no candidate listing, no selection question.
+   - **Ambiguous** (same topic in context): ASK "刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+   - **No relevant context**: Call `paper_quick_scan(topic, limit=20)`, then show as table and **[FORK]** "全部纳入还是选几篇？"
+3. For selected/referenced papers, generate survey with structured tables:
    - **方法分类表**: | 类别 | 代表论文 | 核心思路 | 优势 | 局限 |
    - **实验对比表**: | 论文 | 数据集 | 指标1 | 指标2 | 亮点 |
    - **研究空白与趋势**: open problems, emerging directions

@@ -19,7 +19,7 @@ Generate a structured deep-analysis note for a paper.
 
 ## Process
 
-1. Parse $ARGUMENTS as `paper_id` (e.g., `2301.12345` or `arxiv:2301.12345`)
+1. **Resolve paper_id**: If $ARGUMENTS is a paper ID or arXiv ID, use it directly. If the user refers to a paper by index (e.g. "第3篇", "上面那篇"), resolve from papers discussed earlier in this conversation.
 2. Call `paper_show(paper_id)` to get full paper details
 3. If not found, try `paper_search(query=$ARGUMENTS)` and pick the best match
 4. Generate a structured analysis note in Chinese with these sections:

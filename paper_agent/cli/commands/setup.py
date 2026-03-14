@@ -332,6 +332,12 @@ alwaysApply: false
 
 ## 行为规范
 
+- **对话上下文延续**：如果本轮对话中已经搜到/讨论过论文：
+  - 用户明确引用（"根据已有的"、"用刚才的"、"基于这些写综述"）→ 直接用，不要确认，不要重搜
+  - 用户说了同主题但没明确引用 → 问一下："刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+  - 用户换了新主题 → 当新搜索处理
+  - 没有上下文 → 直接搜，不要多问
+- **意图驱动**：用户意图明确时（如"根据已有的写综述"），跳过所有中间步骤直接出结果。只有意图真正模糊时才问确认。候选列表展示、维度选择、参数调整等中间步骤，只在缺少必要信息时才执行。
 - 中文输出所有分析和摘要
 - fork-only: 只在分叉决策点暂停，最多 2-3 选项；结果之前最多 2 轮确认
 - 工作区操作（note_add/reading_status/group_add）自动执行；文件导出需用户在 FORK 中确认
@@ -389,12 +395,18 @@ This project uses **paper-agent** MCP server for research paper intelligence.
 
 ## Interaction Rules
 
-1. **Fork-only**: Only ask at genuine decision points (max 2-3 options). Before showing results, at most 2 rounds of clarification; after results, decisions are embedded in the output.
-2. **Smart defaults**: Prefer `paper_morning_brief` over 3 separate calls. Prefer `paper_quick_scan` over search+online+merge.
-3. **Auto-track, opt-in export**: Workspace operations (`paper_note_add`, `paper_reading_status`, `paper_group_add`) run automatically — these are internal tracking. File creation/export (Write tool) requires user confirmation. Each workflow's final FORK includes a save/export option.
-4. **Concise**: Max 3 options per question. Smart default + "或者？"
-5. **Persona**: Read `mode` from `paper_workspace_context()`. "workspace" → show progress, auto-mark. "lightweight" → just data.
-6. **Chinese** for all analysis and summaries.
+1. **Context carry-over** (CRITICAL): When the user's request relates to papers already found/discussed in this conversation:
+   - **Explicit reference** (e.g. "根据已有的", "用刚才的", "基于这些论文", "帮我把这些写成综述"): Use those papers directly. No confirmation needed. No re-search.
+   - **Ambiguous** (e.g. user says "写个 GNN 综述", and there are GNN papers in context): ASK "刚才找到了 N 篇 GNN 相关论文，直接用这些？还是再搜索补充？"
+   - **New topic** (e.g. context has GNN papers, user asks about "transformer 综述"): Treat as new search, ignore context.
+   - **No context**: Search directly, no extra question.
+2. **Intent-driven, not step-driven**: When the user's intent is clear (e.g. "根据已有的内容写综述"), skip all intermediate steps and go straight to results. Only ask clarifying questions when the intent is genuinely ambiguous. Intermediate steps (candidate listing, dimension selection, parameter tuning) are skipped unless the user's request lacks essential info.
+3. **Fork-only**: Only ask at genuine decision points (max 2-3 options). Before showing results, at most 2 rounds of clarification; after results, decisions are embedded in the output.
+4. **Smart defaults**: Prefer `paper_morning_brief` over 3 separate calls. Prefer `paper_quick_scan` over search+online+merge.
+5. **Auto-track, opt-in export**: Workspace operations (`paper_note_add`, `paper_reading_status`, `paper_group_add`) run automatically — these are internal tracking. File creation/export (Write tool) requires user confirmation. Each workflow's final FORK includes a save/export option.
+6. **Concise**: Max 3 options per question. Smart default + "或者？"
+7. **Persona**: Read `mode` from `paper_workspace_context()`. "workspace" → show progress, auto-mark. "lightweight" → just data.
+8. **Chinese** for all analysis and summaries.
 
 ## Output Format
 
@@ -639,7 +651,7 @@ Generate a structured deep-analysis note for a paper.
 
 ## Process
 
-1. Parse $ARGUMENTS as `paper_id` (e.g., `2301.12345` or `arxiv:2301.12345`)
+1. **Resolve paper_id**: If $ARGUMENTS is a paper ID or arXiv ID, use it directly. If the user refers to a paper by index (e.g. "第3篇", "上面那篇"), resolve from papers discussed earlier in this conversation.
 2. Call `paper_show(paper_id)` to get full paper details
 3. If not found, try `paper_search(query=$ARGUMENTS)` and pick the best match
 4. Generate a structured analysis note in Chinese with these sections:
@@ -737,26 +749,31 @@ Compare multiple papers on selected dimensions.
 
 ## Process
 
-1. If $ARGUMENTS contains paper IDs, use them directly
-2. Otherwise, ask the user which papers to compare
-   - Optionally search first: `paper_search(query)` to find candidates
-3. Ask which dimensions to compare:
-   - a) 方法架构  b) 实验结果  c) 适用场景  d) 全部
-4. Call `paper_compare(paper_ids, aspects)` to get structured comparison data
-5. Generate comparison tables in Chinese:
+### Step 1 — Resolve papers
 
-   **方法对比**:
-   | 维度 | 论文A | 论文B | 论文C |
-   |------|-------|-------|-------|
-   | 方法 | ... | ... | ... |
-   | 关键技术 | ... | ... | ... |
-   | 主要结果 | ... | ... | ... |
-   | 适用场景 | ... | ... | ... |
+- If $ARGUMENTS contains paper IDs → use them directly
+- **Explicit reference** ("对比刚才的", "这几篇对比一下") → use those papers directly
+- **Ambiguous** (papers in context, no explicit reference) → ASK "刚才找到的这几篇要对比吗？还是指定其他的？"
+- **No context, no IDs** → ask which papers to compare
 
-   **结论与建议**: 明确判断哪种方法在什么场景下最优，给出选型建议
-7. Ask: "要保存对比表格吗？或者基于这些写 survey？"
-8. If save requested, write to file
-9. If export requested, call `paper_export(paper_ids, format="bibtex")`
+### Step 2 — Compare
+
+When papers are clear (from explicit reference or IDs), default to **全部维度** comparison. Don't ask "which dimensions" unless user specifies.
+
+Call `paper_compare(paper_ids, aspects)` and generate tables in Chinese:
+
+| 维度 | 论文A | 论文B | 论文C |
+|------|-------|-------|-------|
+| 方法 | ... | ... | ... |
+| 关键技术 | ... | ... | ... |
+| 主要结果 | ... | ... | ... |
+| 适用场景 | ... | ... | ... |
+
+**结论与建议**: 明确判断哪种方法在什么场景下最优，给出选型建议
+
+### Step 3 — After results
+
+ASK: "要保存对比表格吗？或者基于这些写 survey？"
 """,
     "paper-survey.md": """\
 ---
@@ -781,16 +798,23 @@ Quick-first literature survey.
 
 ## Process
 
-1. Parse $ARGUMENTS as the survey topic
-2. Call `paper_quick_scan(topic=$ARGUMENTS, limit=20)` — local + online, deduped, ranked
-3. Present candidates as numbered list with scores
-4. **ASK**: "这些是初步候选，要纳入哪些？全部还是选几篇？"
-5. For selected papers, generate survey narrative in Chinese
-6. **ASK**: "要修改、补充、还是导出？（BibTeX / Markdown / 保存综述）"
-7. If user wants to export/save:
-   - `paper_export(paper_ids, format="bibtex")` for BibTeX
-   - `paper_group_add(name="survey-{topic}", paper_ids, create_if_missing=True)` to group
-   - Write survey to `survey/{topic}.md` if saving narrative
+### Step 1 — Resolve papers
+
+- **Explicit reference** ("根据已有的", "用刚才的", "基于这些写综述"): use those papers directly. Go to Step 2 immediately — no candidate listing, no selection question.
+- **Ambiguous** (same topic in context): ASK "刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+- **New search**: Call `paper_quick_scan(topic=$ARGUMENTS, limit=20)`, then show candidates as table and ASK "全部纳入还是选几篇？"
+
+### Step 2 — Generate survey
+
+Generate survey narrative in Chinese with structured tables:
+- **方法分类表**: | 类别 | 代表论文 | 核心思路 | 优势 | 局限 |
+- **实验对比表**: | 论文 | 数据集 | 指标1 | 指标2 | 亮点 |
+- **研究空白与趋势**: open problems, emerging directions
+- **结论与建议**: 当前方向的成熟度判断、主流方法对比结论、研究机会在哪里
+
+### Step 3 — After results
+
+**ASK**: "要修改、补充、还是导出？（BibTeX / Markdown / 保存综述）"
 
 Default is quick mode (20 candidates). Full mode (40+) only when user explicitly asks.
 """,
@@ -836,7 +860,10 @@ Batch screening of papers using profile-based relevance scores.
 
 ## Process
 
-1. Call `paper_auto_triage(top_n=5)` — classifies recent unread papers automatically
+1. **Context carry-over**:
+   - If user explicitly references existing papers ("筛一下刚才的", "帮我筛这些"): triage those directly → `paper_auto_triage(paper_ids=[...])`
+   - If papers in context but reference is ambiguous: ASK "要筛选刚才找到的这些论文？还是筛选库里最近的未读论文？"
+   - If no context → default to `paper_auto_triage(top_n=5)`
 2. Present three buckets as tables:
 
    **⭐ 重要** (N 篇)
@@ -874,7 +901,10 @@ Quick trend analysis for a research topic.
 ## Process
 
 1. Parse $ARGUMENTS as the topic
-2. Call `paper_quick_scan(topic=$ARGUMENTS, limit=20)` for recent work
+2. **Context carry-over**:
+   - If user explicitly references existing papers ("根据刚才的", "用这些做趋势分析"): use those papers directly as landscape
+   - If papers in context on the same topic but reference is ambiguous: ASK "刚才找到了 N 篇相关论文，基于这些做趋势分析？还是重新搜索？"
+   - If no context → call `paper_quick_scan(topic=$ARGUMENTS, limit=20)` directly
 3. Call `paper_trend_data(topic=$ARGUMENTS, years_back=3)` for trend numbers
 4. Present as structured tables:
 

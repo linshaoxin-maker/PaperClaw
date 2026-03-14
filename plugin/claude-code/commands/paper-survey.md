@@ -20,15 +20,22 @@ Quick-first literature survey.
 
 ## Process
 
-1. Parse $ARGUMENTS as the survey topic
-2. Call `paper_quick_scan(topic=$ARGUMENTS, limit=20)` — local + online, deduped, ranked
-3. Present candidates as numbered list with scores
-4. **ASK**: "这些是初步候选，要纳入哪些？全部还是选几篇？"
-5. For selected papers, generate survey narrative in Chinese
-6. **ASK**: "要修改、补充、还是导出？（BibTeX / Markdown / 保存综述）"
-7. If user wants to export/save:
-   - `paper_export(paper_ids, format="bibtex")` for BibTeX
-   - `paper_group_add(name="survey-{topic}", paper_ids, create_if_missing=True)` to group
-   - Write survey to `survey/{topic}.md` if saving narrative
+### Step 1 — Resolve papers
+
+- **Explicit reference** ("根据已有的", "用刚才的", "基于这些写综述"): use those papers directly. Go to Step 2 immediately — no candidate listing, no selection question.
+- **Ambiguous** (same topic in context): ASK "刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+- **New search**: Call `paper_quick_scan(topic=$ARGUMENTS, limit=20)`, then show candidates as table and ASK "全部纳入还是选几篇？"
+
+### Step 2 — Generate survey
+
+Generate survey narrative in Chinese with structured tables:
+- **方法分类表**: | 类别 | 代表论文 | 核心思路 | 优势 | 局限 |
+- **实验对比表**: | 论文 | 数据集 | 指标1 | 指标2 | 亮点 |
+- **研究空白与趋势**: open problems, emerging directions
+- **结论与建议**: 当前方向的成熟度判断、主流方法对比结论、研究机会在哪里
+
+### Step 3 — After results
+
+**ASK**: "要修改、补充、还是导出？（BibTeX / Markdown / 保存综述）"
 
 Default is quick mode (20 candidates). Full mode (40+) only when user explicitly asks.

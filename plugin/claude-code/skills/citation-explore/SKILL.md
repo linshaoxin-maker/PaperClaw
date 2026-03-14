@@ -7,7 +7,8 @@ description: Citation chain exploration. Triggers on "引用链", "谁引了", "
 
 ## Flow
 
-1. Call `paper_citation_trace(paper_id, direction="both", max_depth=2)` — traces 2 levels automatically
+1. **Resolve paper_id from context**: If the user says "看引用链" without specifying a paper, use the paper currently being discussed in this conversation. If the user refers to a paper by index (e.g. "第2篇的引用链"), resolve from context. If explicit ID given, use that.
+2. Call `paper_citation_trace(paper_id, direction="both", max_depth=2)` — traces 2 levels automatically
 2. Present results as a tree + key nodes table:
 
    **引用树**: seed → level 1 → level 2 (text tree)
