@@ -1,71 +1,37 @@
 ---
 name: daily-reading
-description: Daily research startup workflow — context recovery, paper collection, digest, and triage. Use when user says "start my day", "每日开工", "今天有什么新论文", "开始工作", or any morning research routine trigger.
-version: 0.2.0
+description: Morning paper reading workflow. Triggers on "start my day", "今天看什么", "morning digest", "每日推荐".
 ---
 
-# Daily Reading — 每日开工
+# Daily Reading
 
-每天早上的完整研究启动流程：恢复上下文 → 采集新论文 → 推荐 → 标记状态。
+## Flow
 
-## 交互流程
+1. Call `paper_morning_brief(days=1)` — this single tool does context recovery + collect + digest + auto-mark in one call
+2. Present as structured table:
 
-### Phase 1: 上下文恢复
+   **今日推荐** (N 篇):
+   | # | 标题 | 评分 | 关键词 | 一句话总结 |
+   **结论与建议**: 今日最值得关注的方向和论文，建议阅读顺序
 
-**工具**: `paper_workspace_context()`
+3. **[FORK]** "深入看哪篇？保存今日摘要？还是先这样？"
 
-呈现昨日研究活动摘要后，**必须询问用户**：
+## If user picks a paper
 
-> 🗣️ 你昨天的进展如上。要：
-> a) 先看昨天未完成的待读论文
-> b) 直接收集今天的新论文
-> c) 两个都要（推荐）
+Hand off to the **deep-dive** skill with the selected paper ID.
 
-### Phase 2: 采集新论文
+## If user wants to save
 
-**工具**: `paper_collect(days=1)`
+Write the digest to `daily/{YYYY-MM-DD}.md` using the daily-digest-template.
 
-呈现采集结果（来源分布、新增/重复数量），然后自动进入推荐。
+## Workspace behavior
 
-### Phase 3: 每日推荐
+The `paper_morning_brief` response includes a `mode` field:
+- `"workspace"`: top picks were auto-marked as `to_read`. Mention this.
+- `"lightweight"`: just present the digest, no status talk.
 
-**工具**: `paper_digest()`
+## Rules
 
-呈现推荐列表后，**必须询问用户**：
-
-> 🗣️ 这 {n} 篇推荐中，要标记哪些为待读？（给我编号，或"全部"）
-> 有特别重要的吗？我可以直接标记为"重要"。
-
-**工具**: `paper_reading_status(选中的 IDs, status)`
-
-### Phase 4: 深入（可选）
-
-**必须询问用户**：
-
-> 🗣️ 要深入看哪篇？还是先干活了？
-> - 给我编号 → 我切换到 **deep-dive** 模式
-> - "先干活" → 结束，祝你今天高效！
-
-### Phase 5: 交付件
-
-**必须询问用户**：
-
-> 🗣️ 要保存今天的阅读摘要吗？
-> 默认保存到：`daily/{YYYY-MM-DD}.md`
-
-**工具**: 使用 [daily-digest-template](references/daily-digest-template.md) 生成文件
-
-## 涉及的 MCP 工具
-
-| 工具 | 阶段 | 用途 |
-|------|------|------|
-| `paper_workspace_context` | Phase 1 | 恢复上下文 |
-| `paper_collect` | Phase 2 | 采集新论文 |
-| `paper_digest` | Phase 3 | 生成推荐 |
-| `paper_reading_status` | Phase 3 | 批量标记状态 |
-| `paper_reading_stats` | Phase 3 | 展示阅读进度 |
-
-## 可跳转的 Skill
-
-- Phase 4 选择深入 → **deep-dive**
-- 想做筛选分流 → **paper-triage**
+- Only 1 checkpoint (the fork above). Everything else is automatic.
+- Don't ask about collection parameters, source selection, or date ranges unless user specifies.
+- If digest is empty (no new papers), say so and suggest `paper_quick_scan` for a topic.

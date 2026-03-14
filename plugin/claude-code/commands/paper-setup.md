@@ -1,12 +1,12 @@
 ---
 description: Set up research profile through conversation — determine research interests and configure sources
 allowed-tools: [
-  "mcp__plugin_paper-agent_paper-agent__paper_profile",
-  "mcp__plugin_paper-agent_paper-agent__paper_profile_update",
-  "mcp__plugin_paper-agent_paper-agent__paper_templates_list",
-  "mcp__plugin_paper-agent_paper-agent__paper_sources_list",
-  "mcp__plugin_paper-agent_paper-agent__paper_sources_enable",
-  "mcp__plugin_paper-agent_paper-agent__paper_collect"
+  "mcp__paper-agent__paper_profile",
+  "mcp__paper-agent__paper_profile_update",
+  "mcp__paper-agent__paper_templates_list",
+  "mcp__paper-agent__paper_sources_list",
+  "mcp__paper-agent__paper_sources_enable",
+  "mcp__paper-agent__paper_collect"
 ]
 ---
 

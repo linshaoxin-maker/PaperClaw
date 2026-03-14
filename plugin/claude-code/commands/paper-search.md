@@ -2,8 +2,8 @@
 description: Search the local paper library by keyword, topic, or method name
 argument-hint: <query>
 allowed-tools: [
-  "mcp__plugin_paper-agent_paper-agent__paper_search",
-  "mcp__plugin_paper-agent_paper-agent__paper_show"
+  "mcp__paper-agent__paper_search",
+  "mcp__paper-agent__paper_show"
 ]
 ---
 
@@ -20,14 +20,10 @@ Search the local paper library.
 
 ## Output Format
 
-```
 找到 N 篇相关论文：
 
-1. **[标题]** — 评分 X.X/10
-   [一句话描述核心贡献]
-
-2. **[标题]** — 评分 X.X/10
-   [一句话描述]
+| # | 标题 | 评分 | 摘要 |
+|---|------|------|------|
+| 1 | ... | 8.5 | ... |
 
 需要查看某篇的详细信息吗？
-```

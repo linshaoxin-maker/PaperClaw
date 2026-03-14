@@ -11,6 +11,7 @@ from typing import Optional
 
 import typer
 
+from paper_agent.cli._skill_content import ROUTER_SKILL, WORKFLOW_SKILLS
 from paper_agent.cli.console import console, print_error, print_success
 
 setup_app = typer.Typer(
@@ -105,6 +106,24 @@ def setup_cursor(
     console.print("  3. Agent 会自动调用 paper-agent MCP 工具\n")
 
 
+def _write_cursor_skills(skills_root: Path) -> int:
+    """Write the router skill + 6 workflow skills into Cursor's skill dirs."""
+    written = 0
+
+    router_dir = skills_root / "paper-agent"
+    router_dir.mkdir(parents=True, exist_ok=True)
+    (router_dir / "SKILL.md").write_text(ROUTER_SKILL)
+    written += 1
+
+    for name, content in WORKFLOW_SKILLS.items():
+        skill_dir = skills_root / f"paper-agent-{name}"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(content)
+        written += 1
+
+    return written
+
+
 def _setup_cursor_project(target: Path, cmd: str, args: list[str]) -> None:
     cursor_dir = target / ".cursor"
 
@@ -112,13 +131,9 @@ def _setup_cursor_project(target: Path, cmd: str, args: list[str]) -> None:
     _merge_mcp_json(mcp_path, cmd, args)
     print_success(f"MCP → {mcp_path}")
 
-    skill_dir = cursor_dir / "skills" / "paper-agent"
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(_CURSOR_SKILL)
-    ref_dir = skill_dir / "references"
-    ref_dir.mkdir(parents=True, exist_ok=True)
-    (ref_dir / "analysis-template.md").write_text(_ANALYSIS_TEMPLATE)
-    print_success(f"Skill → {skill_dir / 'SKILL.md'}")
+    skills_root = cursor_dir / "skills"
+    count = _write_cursor_skills(skills_root)
+    print_success(f"Skills → {skills_root} ({count} skills)")
 
     rule_dir = cursor_dir / "rules"
     rule_dir.mkdir(parents=True, exist_ok=True)
@@ -138,13 +153,9 @@ def _setup_cursor_global(cmd: str, args: list[str]) -> None:
     _merge_mcp_json(mcp_path, cmd, args)
     print_success(f"MCP → {mcp_path}")
 
-    skill_dir = cursor_home / "skills" / "paper-agent"
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(_CURSOR_SKILL)
-    ref_dir = skill_dir / "references"
-    ref_dir.mkdir(parents=True, exist_ok=True)
-    (ref_dir / "analysis-template.md").write_text(_ANALYSIS_TEMPLATE)
-    print_success(f"Skill → {skill_dir / 'SKILL.md'}")
+    skills_root = cursor_home / "skills"
+    count = _write_cursor_skills(skills_root)
+    print_success(f"Skills → {skills_root} ({count} skills)")
 
     rule_dir = cursor_home / "rules"
     rule_dir.mkdir(parents=True, exist_ok=True)
@@ -191,7 +202,8 @@ def _setup_claude_project(target: Path, cmd: str, args: list[str]) -> None:
     print_success(
         f"Commands → {commands_dir}  "
         "(/start-my-day, /paper-search, /paper-analyze, /paper-collect, "
-        "/paper-setup, /paper-compare, /paper-survey, /paper-download)"
+        "/paper-setup, /paper-compare, /paper-survey, /paper-download, "
+        "/paper-triage, /paper-insight)"
     )
 
     claude_md = target / "CLAUDE.md"
@@ -244,136 +256,7 @@ def _setup_claude_global(cmd: str, args: list[str]) -> None:
 # Embedded templates — self-contained, no path dependencies
 # ═══════════════════════════════════════════════════════════════════
 
-_CURSOR_SKILL = """\
----
-name: paper-agent
-description: >-
-  AI research paper intelligence assistant — collect, recommend, search,
-  analyze, compare, and survey arXiv papers via MCP. Use when the user
-  mentions paper, arxiv, digest, research, 论文, 论文分析, 论文对比, 写综述,
-  start my day, paper-analyze, paper-compare, paper-survey, arXiv IDs
-  (like 2301.12345), ML method names, or asks about academic research trends.
----
-
-# Paper Agent
-
-Research paper intelligence powered by the paper-agent MCP server.
-
-## MCP Tools
-
-### Core (v01)
-
-| Tool | Purpose | Typical Trigger |
-|------|---------|-----------------|
-| `paper_search` | FTS search with keyword expansion (`diverse` mode) | User asks about a paper or method |
-| `paper_show` | Full details for a specific paper | User wants to dive into one paper |
-| `paper_collect` | Fetch from arXiv + DBLP + S2 concurrently | User says "收集论文" |
-| `paper_digest` | Daily recommendations | User says "今日推荐" or "start my day" |
-| `paper_stats` | Library statistics | User asks "库里有多少论文" |
-| `paper_profile` | View research profile | User asks "我的研究方向" |
-| `paper_profile_update` | Create/update profile via conversation | User describes research interests |
-| `paper_sources_list` | List all available sources | User asks about arXiv categories |
-| `paper_sources_enable` | Enable/disable sources | User wants to add/remove categories |
-| `paper_templates_list` | List research area templates | User wants a preset template |
-
-### Multi-Paper Intelligence (v02)
-
-| Tool | Purpose | Typical Trigger |
-|------|---------|-----------------|
-| `paper_search_batch` | Search multiple topics at once (grouped results) | User wants to survey/compare N directions |
-| `paper_batch_show` | Get papers info (compact default, `detail=True` for full) | User wants to compare or survey |
-| `paper_compare` | Structured comparison data | User says "对比这几篇论文" |
-| `paper_search_online` | Search arXiv + S2 online (covers conferences!) | Local results insufficient |
-| `paper_download` | Batch download PDFs (pass multiple IDs) | User wants to download papers |
-| `paper_export` | Export to BibTeX/markdown/JSON | User says "导出 BibTeX" |
-| `paper_survey_collect` | Collect papers over N years for survey | User wants to survey a topic |
-
-## MCP Resources
-
-| URI | Content |
-|-----|---------|
-| `paper://digest/today` | Today's digest |
-| `paper://stats` | Library stats |
-| `paper://profile` | Research interests |
-| `paper://recent` | Papers from last 7 days |
-
-## Workflows
-
-### Start My Day
-1. `paper_collect(days=1)` → fetch latest papers
-2. `paper_digest()` → generate recommendations
-3. Present in Chinese: overview → high-confidence picks → reading advice
-
-### Paper Search
-1. `paper_search(query)` → search library
-2. **Check suggestions**: if results have `suggestions` field:
-   - `diverse_search`: re-run with `paper_search(query, diverse=True)` for keyword expansion
-   - `online_search`: suggest `paper_search_online(query)` for real-time arXiv results
-   - `collect_first`: suggest `paper_collect()` to populate library
-3. Show concise list: title, score, one-line summary
-4. `paper_show(paper_id)` for deep dive on request
-
-### Paper Analyze
-1. `paper_show(paper_id)` → get paper details
-2. Generate structured analysis note (see [analysis template](references/analysis-template.md))
-3. Include: core info, translated abstract, method overview, experiments, critique
-
-### Paper Compare
-1. If user provides paper IDs, use them; otherwise search or ask
-2. Ask dimensions: a) 方法架构  b) 实验结果  c) 适用场景  d) 全部
-3. `paper_batch_show(paper_ids)` + `paper_compare(paper_ids, aspects)`
-4. Generate comparison table in Chinese
-5. Ask: "要保存对比表格吗？或者基于这些写 survey？"
-
-### Paper Survey (single topic)
-1. Parse topic → extract keywords
-2. `paper_survey_collect(keywords, venues, years_back)` → collect from arXiv + DBLP + S2
-3. `paper_search(topic)` + optionally `paper_search_online(query)`
-4. `paper_batch_show(selected_ids)` → get full details
-5. Generate survey: 引言, 方法分类, 实验对比, 未来方向, 参考文献
-6. `paper_export(ids, format="bibtex")` → export references
-
-### Multi-Topic Survey (multiple directions)
-When user asks to survey/compare multiple directions at once:
-1. Extract the N direction keywords
-2. `paper_search_batch(queries=[dir1, dir2, ...], limit_per_query=20, diverse=True)` → search all at once
-3. Pick representative papers from each group
-4. `paper_batch_show(all_ids)` → get full details
-5. Generate survey organized by direction with cross-direction comparison
-6. `paper_export(all_ids, format="bibtex")`
-
-IMPORTANT: Never use /paper-analyze for multi-paper tasks. Use /paper-survey or /paper-compare.
-
-### Paper Download
-1. Parse paper ID(s) or search query
-2. `paper_download(paper_ids)` → download PDFs
-3. Report results: ✅ downloaded / ⏭️ existed / ❌ failed
-
-### Coding Context
-When user works on AI/ML code, watch for:
-- arXiv ID patterns (`2301.12345`)
-- Method names (attention, BERT, LoRA, transformer, GNN, diffusion, etc.)
-
-Proactively suggest: "检测到你在讨论 [技术], 要查看相关论文吗？"
-
-## Output Rules
-
-1. **Chinese first** for all analysis and summaries
-2. **Wikilink format**: `[[论文标题]]` for knowledge base linking
-3. **Concise by default**, full detail only for deep analysis
-4. **No duplicate work**: reference existing notes if available
-5. **Always suggest next step**: after each action, suggest what to do next
-
-## First-Time Setup
-
-If paper-agent is not initialized, guide the user:
-
-```bash
-paper-agent init            # Configure LLM
-paper-agent profile create  # Set research interests
-paper-agent collect -d 7    # Initial collection
-```
-"""
+_CURSOR_SKILL_LEGACY = ""  # Replaced by _write_cursor_skills() using _skill_content.py
 
 _CURSOR_RULE = """\
 ---
@@ -391,128 +274,49 @@ alwaysApply: false
 ## 触发条件
 
 ### 日常推荐
-- 用户说 "start my day" 或 "今日推荐" → `paper_collect(days=1)` + `paper_digest()`
+- 用户说 "start my day" / "今日推荐" / "morning" → `paper_morning_brief(days=1)` 一次调用完成全部
 
 ### 搜索
-- 用户说 "搜索论文" / "paper search" + 关键词 → `paper_search(query)`
-- 结果少时建议用户使用 `paper_search(query, diverse=True)` 扩展关键词
-- 本地不够时建议 `paper_search_online(query)` 在线搜索
-
-### 采集
-- 用户说 "收集论文" / "paper collect" → `paper_collect()`
+- 搜索关键词 → `paper_search(query)` 或 `paper_quick_scan(topic)` (含在线补充)
+- 结果少时自动建议 diverse 搜索或在线搜索
 
 ### 单篇分析
-- 用户说 "分析论文" / "paper-analyze" + ID → `paper_show(paper_id)` 并生成分析笔记
-- 用户提到 arXiv ID 格式（如 `2301.12345`）→ `paper_show()`
+- "分析论文" / arXiv ID → `paper_show()` + 生成分析 + `paper_note_add(mark_as="reading")`
 
-### 多篇对比
-- 用户说 "对比论文" / "论文比较" / "paper compare" → `paper_batch_show` + `paper_compare`
-- 用户说 "这几篇有什么区别" / "比一下方法" → 同上
+### 批量筛选
+- "筛一下" / "哪些值得看" / "triage" → `paper_auto_triage()` 自动三档分流
+
+### 引用追踪
+- "引用链" / "谁引了" / "citation" → `paper_citation_trace()` 递归追踪
+
+### 趋势分析
+- "趋势" / "trend" / "这个方向火不火" → `paper_quick_scan()` + `paper_trend_data()`
 
 ### 文献综述
-- 用户说 "写综述" / "literature survey" / "paper survey" → Survey 工作流
-- 用户说 "这个方向有哪些工作" / "梳理一下研究现状" → 同上
+- "综述" / "survey" → `paper_quick_scan()` quick-first 模式
+
+### 对比
+- "对比论文" → `paper_batch_show` + `paper_compare`
 
 ### 下载
-- 用户说 "下载论文" / "paper download" → `paper_download(paper_ids)`
+- 给论文标题 → `paper_find_and_download(title)`
+- 给 arXiv ID → `paper_download(paper_ids)`
 
-### 导出
-- 用户说 "导出 BibTeX" / "export" → `paper_export(paper_ids, format)`
-
-### 编码上下文
-- 用户在 AI/ML 代码中提到方法名（transformer, attention, BERT, LoRA, GNN 等）→ 建议搜索相关论文
+### 分组管理
+- 需要建组+加论文 → `paper_group_add(name, ids, create_if_missing=True)` 一步到位
 
 ## 行为规范
 
-- 所有论文分析和摘要使用中文输出
-- 论文标题使用 `[[论文标题]]` wikilink 格式
-- 搜索结果保持精简，深度分析才展开全部内容
-- 如果 paper-agent 未初始化，引导用户运行 `paper-agent init`
-- 搜索结果少时主动提示：可以尝试 `diverse=True` 扩展关键词，或在线搜索
+- 中文输出所有分析和摘要
+- fork-only: 只在分叉决策点暂停，最多 2-3 选项；结果之前最多 2 轮确认
+- 工作区操作（note_add/reading_status/group_add）自动执行；文件导出需用户在 FORK 中确认
+- 论文列表必须用表格展示（| # | 标题 | 评分 | 关键词 | 一句话 |），不要用 bullet list
+- 每个 workflow 输出必须以「结论与建议」结尾——告诉用户这些数据意味着什么、下一步该怎么做
+- 读取 `paper_workspace_context()` 的 `mode` 字段判断用户类型
+- paper-agent 未初始化时引导运行 `paper-agent init`
 """
 
-_ANALYSIS_TEMPLATE = """\
-# Paper Analysis Note Template
-
-Use this template when generating deep analysis notes for papers.
-
-## Frontmatter
-
-```yaml
----
-date: {{date}}
-paper_id: {{paper_id}}
-title: "{{title}}"
-authors: [{{authors}}]
-domain: {{domain}}
-tags: [{{tags}}]
-quality_score: {{score}}/10
-status: reading
----
-```
-
-## Note Structure
-
-### 核心信息
-- **标题**: {{title}}
-- **作者**: {{authors}}
-- **机构**: {{affiliations}}
-- **发表**: {{venue}} {{year}}
-- **链接**: [arXiv]({{url}}) | [PDF]({{pdf_url}})
-
-### 摘要翻译
-> （中文翻译的摘要）
-
-### 要点提炼
-1. （核心贡献 1）
-2. （核心贡献 2）
-3. （核心贡献 3）
-
-### 研究背景与动机
-（为什么做这个研究？解决什么问题？）
-
-### 方法概述
-#### 核心思想
-（一句话概括方法）
-
-#### 方法框架
-（整体架构描述）
-
-#### 各模块详细说明
-（关键模块的技术细节）
-
-### 实验结果
-#### 主要结果
-（核心实验数据和对比）
-
-#### 消融实验
-（各模块的贡献分析）
-
-### 深度分析
-#### 研究价值评估
-（对领域的贡献程度）
-
-#### 方法优势
-（相比现有方法的优势）
-
-#### 局限性
-（方法的不足和限制）
-
-#### 适用场景
-（最适合应用的场景）
-
-### 与相关论文对比
-| 论文 | 方法 | 优势 | 不足 |
-|------|------|------|------|
-| 本文 | | | |
-| 对比 1 | | | |
-
-### 未来工作建议
-1. （可能的改进方向）
-
-### 我的笔记
-（个人理解和想法）
-"""
+_ANALYSIS_TEMPLATE_LEGACY = ""  # Replaced by deep-dive skill's inline template
 
 _CLAUDE_MD = """\
 # Paper Agent
@@ -521,97 +325,150 @@ This project uses **paper-agent** MCP server for research paper intelligence.
 
 ## Available MCP Tools
 
-### Core Tools (v01 — single-paper)
-- `paper_search(query, diverse=False)` — search local library (diverse=True expands keywords via synonyms)
-- `paper_show(paper_id)` — show paper details (accepts arXiv IDs like `2301.12345`)
-- `paper_collect(days)` — collect from arXiv + DBLP + Semantic Scholar concurrently
-- `paper_digest()` — generate daily recommendations
+### Core (v01)
+- `paper_search(query, diverse=False)` — search local library
+- `paper_show(paper_id)` — paper details (accepts arXiv IDs)
+- `paper_collect(days)` — collect from arXiv + DBLP + S2
+- `paper_digest()` — daily recommendations
 - `paper_stats()` — library statistics
 
+### Workspace Layer (v02)
+- `paper_workspace_context()` — session recovery (returns `mode: "workspace"|"lightweight"`)
+- `paper_workspace_status()` — human-readable dashboard
+- `paper_reading_status(paper_ids, status)` — mark as to_read/reading/read/important
+- `paper_note_add(paper_id, content, source, mark_as)` — add note + optionally mark status
+- `paper_group_create(name)` / `paper_group_add(name, ids, create_if_missing)` — manage groups
+- `paper_citations(paper_id, direction)` — single-level citation lookup
+
 ### Multi-Paper Intelligence (v02)
-- `paper_search_batch(queries, limit_per_query)` — search multiple topics at once (for surveys)
-- `paper_batch_show(paper_ids)` — get details for multiple papers at once
-- `paper_compare(paper_ids, aspects)` — structured comparison data for multiple papers
-- `paper_search_online(query, sources=["arxiv","s2"])` — search arXiv + Semantic Scholar online (covers conferences!)
-- `paper_survey_collect(keywords, venues, years_back)` — collect papers over N years for survey
-- `paper_download(paper_ids)` — download PDF files from arXiv
-- `paper_export(paper_ids, format)` — export to BibTeX / markdown / JSON
+- `paper_search_batch(queries)` — multi-topic search
+- `paper_batch_show(paper_ids)` — bulk paper details
+- `paper_compare(paper_ids, aspects)` — structured comparison
+- `paper_search_online(query)` — real-time arXiv + S2
+- `paper_survey_collect(keywords, venues, years_back)` — survey collection
+- `paper_download(paper_ids)` — PDF download
+- `paper_export(paper_ids, format)` — BibTeX/markdown/JSON
+- `paper_find_and_download(title)` — find by exact title + download
 
-### Profile & Sources Management
-- `paper_profile()` — view current research profile
-- `paper_profile_update(topics, keywords, enable_sources)` — create/update profile via conversation
-- `paper_sources_list()` — list all available sources (arXiv categories, conferences)
-- `paper_sources_enable(enable, disable)` — enable/disable specific sources
-- `paper_templates_list()` — list research area templates for quick profile setup
+### Capability-Sunk Automation (v03)
+- `paper_quick_scan(topic, limit=20)` — one-call topic scan: local + online, deduped, ranked
+- `paper_auto_triage(paper_ids, top_n=5)` — auto-classify into important/to_read/skip
+- `paper_citation_trace(paper_id, max_depth=2)` — recursive citation trace in one call
+- `paper_morning_brief(days=1)` — one-call morning pipeline: context + collect + digest + auto-mark
+- `paper_trend_data(topic, years_back=3)` — publication trend by year x direction
 
-## Custom Commands
+### Profile & Sources
+- `paper_profile()` / `paper_profile_update(topics, keywords)` — research profile
+- `paper_sources_list()` / `paper_sources_enable(enable, disable)` — source management
+- `paper_templates_list()` — research area templates
 
-### Daily Workflow
-- `/start-my-day` — collect today's papers + generate digest
-- `/paper-search <query>` — search the library
-- `/paper-analyze <paper_id>` — deep analysis of a paper
-- `/paper-collect [days]` — collect from arXiv + DBLP + S2
-- `/paper-setup` — guided profile creation through conversation
+## Interaction Rules
 
-### Multi-Paper Workflows (v02)
-- `/paper-compare` — compare multiple papers side by side
-- `/paper-survey <topic>` — generate literature survey from papers
-- `/paper-download <id>` — download PDF files from arXiv
+1. **Fork-only**: Only ask at genuine decision points (max 2-3 options). Before showing results, at most 2 rounds of clarification; after results, decisions are embedded in the output.
+2. **Smart defaults**: Prefer `paper_morning_brief` over 3 separate calls. Prefer `paper_quick_scan` over search+online+merge.
+3. **Auto-track, opt-in export**: Workspace operations (`paper_note_add`, `paper_reading_status`, `paper_group_add`) run automatically — these are internal tracking. File creation/export (Write tool) requires user confirmation. Each workflow's final FORK includes a save/export option.
+4. **Concise**: Max 3 options per question. Smart default + "或者？"
+5. **Persona**: Read `mode` from `paper_workspace_context()`. "workspace" → show progress, auto-mark. "lightweight" → just data.
+6. **Chinese** for all analysis and summaries.
 
-## Interaction Principles
+## Output Format
 
-Every workflow follows the same loop:
-1. User initiates (natural language or slash command)
-2. AI understands intent → confirms/clarifies
-3. Calls MCP tool(s) → gets data
-4. Formats results (Chinese, tables, wikilinks)
-5. Suggests next step ("保存吗？" "继续分析？" "写 survey？")
-6. User responds → loop
+### Tables First
 
-## Output Conventions
+All paper lists MUST use tables, never bullet-point lists:
 
-- Use **Chinese** for all paper analysis and summaries
-- Use `[[论文标题]]` wikilink format for knowledge base linking
-- Keep search results concise; expand only for deep analysis
-- After analysis, ask if user wants to save to file
-- After comparison, suggest writing a survey
-- Search results that include `suggestions` → follow them proactively
+| # | 标题 | 评分 | 关键词 | 一句话总结 |
+|---|------|------|--------|-----------|
 
-## First-Time Setup
+For comparisons, use dimension-based tables:
 
-```bash
-paper-agent init            # Configure LLM provider and API key (terminal only)
-```
+| 维度 | 论文A | 论文B | 论文C |
+|------|-------|-------|-------|
 
-Then in Claude Code:
-```
-/paper-setup                # Create research profile via conversation
-```
+For trends, use year-based tables with direction arrows:
+
+| 子方向 | 2023 | 2024 | 2025 | 趋势 |
+|--------|------|------|------|------|
+
+### Conclusion Required
+
+Every workflow output MUST end with a **结论与建议** section BEFORE the FORK options. This section should contain:
+- **判断**: What does this data mean? (e.g. "这个方向正在从X转向Y", "论文A的方法在Z场景下明显优于B")
+- **建议**: What should the researcher do next? (e.g. "建议优先读第2和第5篇", "如果你关注X，A的方法更适合")
+
+Do NOT just present data — always tell the researcher "so what".
+
+### Format by Workflow
+
+| Workflow | Table format | Conclusion focus |
+|----------|-------------|-----------------|
+| daily-reading | 评分+关键词+一句话 | 今日最值得关注的方向和论文 |
+| search | 评分+关键词+一句话 | 搜索结果中的关键发现 |
+| deep-dive | 核心信息表+对比表 | 研究价值判断+与用户研究的关联 |
+| compare | 多维对比表 | 哪种方法在什么场景下最优 |
+| survey | 方法分类表+实验对比表 | 研究空白和趋势判断 |
+| triage | 三档分类表 | 为什么这几篇最重要 |
+| insight | 年度趋势表+子方向热度表 | 方向判断和时机建议 |
+| citation | 引用树+关键节点表 | 哪些是领域关键节点 |
+
+## First-Run Detection
+
+At session start, silently call `paper_profile()`:
+- **No profile**: Say "看起来你还没配置研究方向，我来帮你设置？" Then guide through profile creation (same flow as /paper-setup). After saving, offer initial collection.
+- **Profile exists, empty library** (check `paper_stats()`): Say "论文库还是空的，要我帮你采集最近一周的论文吗？"
+- **Profile + library exist**: Normal operation. No special greeting.
+
+## Error Handling
+
+- `paper-agent init` not done (MCP connection fails): "paper-agent 还没有初始化。请先在终端运行 `paper-agent init` 配置 LLM。"
+- Search returns 0 results: "本地没找到相关论文，要在线搜索吗？" (suggest `paper_search_online`)
+- Online search/download fails: "在线搜索暂时不可用，可以先看本地库。" (don't show raw error)
+- Empty digest: "今天没有新论文，要搜一个主题看看？" (suggest `paper_quick_scan`)
+
+## Commands
+
+- `/start-my-day` — morning brief
+- `/paper-search <query>` — search
+- `/paper-analyze <id>` — deep analysis
+- `/paper-collect [days]` — collect
+- `/paper-setup` — profile creation
+- `/paper-compare` — compare papers
+- `/paper-survey <topic>` — literature survey
+- `/paper-download <id>` — download PDF
+- `/paper-triage` — batch screening
+- `/paper-insight <topic>` — trend analysis
 """
 
 _CLAUDE_COMMANDS: dict[str, str] = {
     "start-my-day.md": """\
 ---
-description: Collect latest arXiv papers and generate today's personalized digest
+description: One-call morning pipeline — context recovery, collect, digest, auto-mark
 allowed-tools: [
-  "mcp__paper-agent__paper_collect",
-  "mcp__paper-agent__paper_digest",
-  "mcp__paper-agent__paper_stats"
+  "mcp__paper-agent__paper_morning_brief",
+  "mcp__paper-agent__paper_show"
 ]
 ---
 
 # Start My Day
 
-Generate today's personalized paper digest.
+Generate today's personalized paper digest in one call.
 
 ## Process
 
-1. Call `paper_collect(days=1)` to fetch the latest papers from arXiv
-2. Call `paper_digest()` to generate today's recommendations
-3. Present results in Chinese:
-   - **今日概览**: total collected, new papers, scoring summary
-   - **高置信推荐**: top papers with title, score, one-line reason
-   - **阅读建议**: which papers to prioritize and why
+1. Call `paper_morning_brief(days=1)` — this single tool does context + collect + digest + auto-mark
+2. Present in Chinese with structured format:
+
+   **今日概览**: X 篇新论文，Y 篇高相关
+
+   | # | 标题 | 评分 | 关键词 | 一句话总结 |
+   |---|------|------|--------|-----------|
+
+   **结论与建议**: 今日论文主要聚焦于 [方向]，建议优先关注第 X 篇（[理由]）
+
+   If mode is "workspace": mention auto-marked papers
+3. **ASK**: "深入看哪篇？保存今日摘要？还是先这样？"
+4. If user picks a paper, call `paper_show(paper_id)` for details
+5. If user wants to save, write digest to `daily/{YYYY-MM-DD}.md`
 """,
     "paper-search.md": """\
 ---
@@ -638,9 +495,11 @@ Search the local paper library.
 
 找到 N 篇相关论文：
 
-| # | 标题 | 评分 | 摘要 |
-|---|------|------|------|
-| 1 | ... | 8.5 | ... |
+| # | 标题 | 评分 | 关键词 | 一句话总结 |
+|---|------|------|--------|-----------|
+| 1 | ... | 8.5 | GNN, placement | ... |
+
+**结论**: [搜索结果中的关键发现，如"这些论文主要分为X和Y两个方向"]
 
 需要查看某篇的详细信息吗？
 """,
@@ -651,6 +510,7 @@ argument-hint: <paper_id or arxiv_id>
 allowed-tools: [
   "mcp__paper-agent__paper_show",
   "mcp__paper-agent__paper_search",
+  "mcp__paper-agent__paper_note_add",
   "Bash",
   "Read",
   "Write"
@@ -673,9 +533,11 @@ Generate a structured deep-analysis note for a paper.
    - **研究背景与动机**: why this research matters
    - **方法概述**: core idea, framework, key modules
    - **实验结果**: main results + ablation studies
-   - **深度分析**: value, strengths, limitations, use cases
-   - **与相关论文对比**: comparison table
-   - **未来工作建议**: potential improvements
+   - **深度分析**: value, strengths, limitations, use cases (use table for strengths/limitations)
+   - **与相关论文对比**: comparison table (| 维度 | 本文 | 对比1 | 对比2 |)
+   - **结论与建议**: 研究价值判断 + 与用户研究方向的关联 + 值不值得深入跟进
+5. Auto-track: call `paper_note_add(paper_id, content, mark_as="reading")` to save to workspace
+6. **ASK**: "要导出分析笔记为文件？看引用链？还是先这样？"
 """,
     "paper-collect.md": """\
 ---
@@ -765,63 +627,53 @@ Compare multiple papers on selected dimensions.
 3. Ask which dimensions to compare:
    - a) 方法架构  b) 实验结果  c) 适用场景  d) 全部
 4. Call `paper_compare(paper_ids, aspects)` to get structured comparison data
-5. Generate a comparison table in Chinese:
-   | 论文 | 方法 | 关键技术 | 主要结果 | 适用场景 |
-6. Provide analysis summary: which approach is best for what scenario
+5. Generate comparison tables in Chinese:
+
+   **方法对比**:
+   | 维度 | 论文A | 论文B | 论文C |
+   |------|-------|-------|-------|
+   | 方法 | ... | ... | ... |
+   | 关键技术 | ... | ... | ... |
+   | 主要结果 | ... | ... | ... |
+   | 适用场景 | ... | ... | ... |
+
+   **结论与建议**: 明确判断哪种方法在什么场景下最优，给出选型建议
 7. Ask: "要保存对比表格吗？或者基于这些写 survey？"
 8. If save requested, write to file
 9. If export requested, call `paper_export(paper_ids, format="bibtex")`
 """,
     "paper-survey.md": """\
 ---
-description: Generate a literature survey from selected papers
+description: Quick literature survey — one-call topic scan, then optional full survey
 argument-hint: <topic>
 allowed-tools: [
-  "mcp__paper-agent__paper_search",
-  "mcp__paper-agent__paper_search_online",
-  "mcp__paper-agent__paper_survey_collect",
+  "mcp__paper-agent__paper_quick_scan",
   "mcp__paper-agent__paper_batch_show",
   "mcp__paper-agent__paper_compare",
   "mcp__paper-agent__paper_export",
+  "mcp__paper-agent__paper_group_add",
   "Write"
 ]
 ---
 
 # Paper Survey
 
-Generate a structured literature survey around a research topic.
+Quick-first literature survey.
 
 ## Process
 
 1. Parse $ARGUMENTS as the survey topic
-2. Analyze the topic — extract keywords, expand search terms, confirm with user
-3. Search for papers:
-   - `paper_search(query)` for local library
-   - If results insufficient, ask user: "本地找到 N 篇，要从 arXiv 在线补充搜索吗？"
-   - If yes, `paper_search_online(query)` for additional papers
-4. Present candidate list and let user select which to include
-5. Ask which sections to include:
-   - a) Background & Motivation
-   - b) 方法分类与对比
-   - c) 实验结果汇总
-   - d) Open Problems & Future Directions
-   - e) 全部
-6. Call `paper_batch_show(selected_ids)` to get full details
-7. Generate the survey in Chinese with proper citations
-8. Show draft and ask for feedback: "需要修改哪里？"
-9. Iterate based on feedback
-10. Ask save path and write to file
-11. Offer to export BibTeX: `paper_export(ids, format="bibtex")`
+2. Call `paper_quick_scan(topic=$ARGUMENTS, limit=20)` — local + online, deduped, ranked
+3. Present candidates as numbered list with scores
+4. **ASK**: "这些是初步候选，要纳入哪些？全部还是选几篇？"
+5. For selected papers, generate survey narrative in Chinese
+6. **ASK**: "要修改、补充、还是导出？（BibTeX / Markdown / 保存综述）"
+7. If user wants to export/save:
+   - `paper_export(paper_ids, format="bibtex")` for BibTeX
+   - `paper_group_add(name="survey-{topic}", paper_ids, create_if_missing=True)` to group
+   - Write survey to `survey/{topic}.md` if saving narrative
 
-## Output Format
-
-Survey should include:
-- 引言与背景
-- 方法分类 (taxonomy)
-- 各方法详解与对比表格
-- 实验对比
-- 研究空白与未来方向
-- 参考文献
+Default is quick mode (20 candidates). Full mode (40+) only when user explicitly asks.
 """,
     "paper-download.md": """\
 ---
@@ -830,7 +682,8 @@ argument-hint: <paper_id or search query>
 allowed-tools: [
   "mcp__paper-agent__paper_search",
   "mcp__paper-agent__paper_show",
-  "mcp__paper-agent__paper_download"
+  "mcp__paper-agent__paper_download",
+  "mcp__paper-agent__paper_find_and_download"
 ]
 ---
 
@@ -840,14 +693,75 @@ Download PDF files for one or more papers.
 
 ## Process
 
-1. Parse $ARGUMENTS as paper ID(s) or a search query
-2. If it looks like a paper ID (e.g., 2301.12345), download directly
-3. If it's a query, search first and ask which papers to download
-4. Call `paper_download(paper_ids)` to download PDFs
-5. Report results in Chinese:
-   - ✅ 已下载: filename, path
-   - ⏭️ 已存在: filename
-   - ❌ 失败: reason
-6. Ask: "要阅读哪篇？"
+1. Parse $ARGUMENTS as paper ID(s), title, or a search query
+2. If it looks like a paper ID (e.g., 2301.12345), call `paper_download(paper_ids)`
+3. If it looks like a paper title, call `paper_find_and_download(title=$ARGUMENTS)`
+4. If it's a query, search first and ask which papers to download
+5. Report results in Chinese
+""",
+    "paper-triage.md": """\
+---
+description: Batch paper screening — auto-classify into important/to_read/skip
+allowed-tools: [
+  "mcp__paper-agent__paper_auto_triage",
+  "mcp__paper-agent__paper_reading_status"
+]
+---
+
+# Paper Triage
+
+Batch screening of papers using profile-based relevance scores.
+
+## Process
+
+1. Call `paper_auto_triage(top_n=5)` — classifies recent unread papers automatically
+2. Present three buckets as tables:
+
+   **⭐ 重要** (N 篇)
+   | # | 标题 | 评分 | 入选理由 |
+   |---|------|------|---------|
+
+   **📖 待读** (N 篇)
+   | # | 标题 | 评分 | 简评 |
+
+   **⏭️ 跳过** (N 篇)
+   | # | 标题 | 评分 | 跳过理由 |
+
+   **结论**: 为什么这几篇最值得关注（关联用户 profile 说明）
+3. **ASK**: "这是按你 profile 的分类，同意吗？要调整哪些？"
+4. Apply status marks per user's confirmation/adjustment
+5. **ASK**: "已标记完成。要保存筛选报告？还是先这样？"
+""",
+    "paper-insight.md": """\
+---
+description: Research trend analysis — publication trends, sub-direction heat map
+argument-hint: <topic>
+allowed-tools: [
+  "mcp__paper-agent__paper_quick_scan",
+  "mcp__paper-agent__paper_trend_data"
+]
+---
+
+# Research Insight
+
+Quick trend analysis for a research topic.
+
+## Process
+
+1. Parse $ARGUMENTS as the topic
+2. Call `paper_quick_scan(topic=$ARGUMENTS, limit=20)` for recent work
+3. Call `paper_trend_data(topic=$ARGUMENTS, years_back=3)` for trend numbers
+4. Present as structured tables:
+
+   **趋势总览**
+   | 子方向 | 2023 | 2024 | 2025 | 趋势 |
+   |--------|------|------|------|------|
+
+   **热门论文**
+   | # | 标题 | 年份 | 引用 | 一句话 |
+   |---|------|------|------|--------|
+
+   **结论与建议**: 这个方向整体趋势判断，哪些子方向在上升/下降，当前入场的时机建议
+5. **ASK**: "要深入某个子方向？导出分析报告？还是先这样？"
 """,
 }

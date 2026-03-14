@@ -139,6 +139,83 @@ class CitationService:
             pass
         return results
 
+    def trace(
+        self,
+        paper_id: str,
+        direction: str = "both",
+        max_depth: int = 2,
+        limit_per_level: int = 10,
+    ) -> dict[str, Any]:
+        """Recursive citation trace up to *max_depth* levels.
+
+        Returns a tree structure with discovered papers at each level,
+        auto-saving new papers to the local library.
+        """
+        paper = self._storage.get_paper(paper_id)
+        if not paper:
+            return {"error": f"Paper {paper_id} not found in local database"}
+
+        s2_id = self._resolve_s2_id(paper)
+        if not s2_id:
+            return {"error": f"Cannot resolve Semantic Scholar ID for '{paper.title}'"}
+
+        seed = {"id": paper.id, "title": paper.title, "year": str(paper.published_at.year) if paper.published_at else ""}
+        levels: list[dict[str, Any]] = []
+        total_discovered = 0
+        new_saved = 0
+
+        current_s2_ids: list[tuple[str, str]] = [(s2_id, paper.title)]
+
+        headers = self._headers()
+
+        for depth in range(1, max_depth + 1):
+            level_papers: list[dict[str, Any]] = []
+            next_s2_ids: list[tuple[str, str]] = []
+
+            for parent_s2_id, parent_title in current_s2_ids[:limit_per_level]:
+                if direction in ("both", "references"):
+                    refs = self._fetch_connections(parent_s2_id, "references", limit_per_level, headers)
+                    self._save_new_papers(refs)
+                    new_saved += len(refs)
+                    for r in refs:
+                        entry = {**r, "direction": "reference", "parent": parent_title}
+                        level_papers.append(entry)
+                        if r.get("s2_id"):
+                            next_s2_ids.append((r["s2_id"], r["title"]))
+
+                if direction in ("both", "citations"):
+                    cites = self._fetch_connections(parent_s2_id, "citations", limit_per_level, headers)
+                    self._save_new_papers(cites)
+                    new_saved += len(cites)
+                    for c in cites:
+                        entry = {**c, "direction": "cited_by", "parent": parent_title}
+                        level_papers.append(entry)
+                        if c.get("s2_id"):
+                            next_s2_ids.append((c["s2_id"], c["title"]))
+
+            seen_titles: set[str] = set()
+            deduped: list[dict[str, Any]] = []
+            for p in level_papers:
+                t = p["title"].lower().strip()
+                if t not in seen_titles:
+                    seen_titles.add(t)
+                    deduped.append(p)
+
+            total_discovered += len(deduped)
+            levels.append({"depth": depth, "count": len(deduped), "papers": deduped[:limit_per_level * 2]})
+            current_s2_ids = next_s2_ids
+
+            if not next_s2_ids:
+                break
+
+        return {
+            "seed": seed,
+            "levels": levels,
+            "total_discovered": total_discovered,
+            "new_saved": new_saved,
+            "depth_reached": len(levels),
+        }
+
     def _save_new_papers(self, entries: list[dict[str, str]]) -> None:
         for e in entries:
             if not e.get("title"):

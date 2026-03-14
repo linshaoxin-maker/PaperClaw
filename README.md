@@ -244,23 +244,29 @@ paper-agent setup claude-code --scope global
 
 配置完成后在该目录运行 `claude`，可以使用：
 
-**日常命令（v01）：**
-- `/start-my-day` → 收集今日论文 + 生成推荐
-- `/paper-search transformer` → 搜索本地论文库
-- `/paper-analyze 2301.12345` → 生成结构化分析笔记
-- `/paper-collect 7` → 收集最近 7 天论文
-- `/paper-setup` → 对话式配置研究方向
+**日常命令：**
+- `/start-my-day` → `paper_morning_brief`: 一次调用完成 context + collect + digest + auto-mark（表格化展示 + 结论与建议）
+- `/paper-search transformer` → 搜索论文库
+- `/paper-analyze 2301.12345` → 深度分析 + 自动存笔记 + 标记状态
+- `/paper-collect 7` → 三源并行采集
+- `/paper-setup` → 对话式配置
 
-**多篇智能（v02）：**
-- `/paper-compare` → 多篇论文方法/结果对比
-- `/paper-survey AI for EDA` → 生成文献综述
+**多篇智能：**
+- `/paper-compare` → 多篇对比
+- `/paper-survey AI for EDA` → `paper_quick_scan` quick-first 文献综述
 - `/paper-download 2301.12345` → 下载 PDF
-- "帮我找 Attention Is All You Need 这篇" → 按标题精确查找 + 下载
+- "帮我找 Attention Is All You Need" → `paper_find_and_download` 精确查找 + 下载
 
-**Workspace（v02）：**
-- 运行 setup 后自动创建 `.paper-agent/` 目录
-- 阅读进度、笔记、分组以 markdown 文件沉淀，打开文件夹就能看到
-- `.paper-agent/README.md` 是自动更新的研究仪表盘
+**能力下沉工具（v03 新增）：**
+- `/paper-triage` → `paper_auto_triage`: 自动按 profile 三档分流
+- `/paper-insight GNN placement` → `paper_trend_data`: 趋势分析（按年×方向）
+- `paper_citation_trace` → 递归引用追踪（2 层，一次调用）
+- `paper_quick_scan` → 本地+在线搜索去重排序（替代 3 步 AI 链）
+
+**Workspace：**
+- `.paper-agent/` 目录：阅读进度、笔记、分组 → markdown 文件
+- `paper_workspace_context()` 返回 `mode` 字段自动区分用户类型
+- `paper_note_add(mark_as=)` / `paper_group_add(create_if_missing=True)` → 一步两操作
 
 或直接自然语言："帮我找 RAG 相关的论文"
 
@@ -327,7 +333,9 @@ my-research-project/
         ├── paper-setup.md        ← /paper-setup（配置研究方向）
         ├── paper-compare.md      ← /paper-compare（多篇对比）
         ├── paper-survey.md       ← /paper-survey（文献综述）
-        └── paper-download.md     ← /paper-download（PDF 下载）
+        ├── paper-download.md     ← /paper-download（PDF 下载）
+        ├── paper-triage.md       ← /paper-triage（批量筛选）
+        └── paper-insight.md      ← /paper-insight（趋势分析）
 ```
 
 #### Phase 3: 在 Claude Code 里配置研究方向（对话式，约 3 分钟）
@@ -417,22 +425,18 @@ Claude: 正在收集今日论文...
 
         📋 今日论文推荐 — 2026-03-13
 
-        🔴 高置信推荐（8 篇）
+        **高置信推荐**（8 篇）
 
-        1. [[Attention Is All You Need for EDA]] — 9.2/10
-           提出将 transformer 架构应用于电路布局优化，在 ISPD benchmark
-           上比传统方法快 3.2×。
-           → 与你的 "circuit design + transformer" 方向高度匹配
+        | # | 标题 | 评分 | 关键词 | 一句话总结 |
+        |---|------|------|--------|-----------|
+        | 1 | [[Attention Is All You Need for EDA]] | 9.2 | transformer, placement | 将 transformer 应用于电路布局优化，比传统方法快 3.2× |
+        | 2 | [[GNN-Driven High-Level Synthesis]] | 8.7 | GNN, HLS | 用 GNN 预测 HLS 设计空间 Pareto 前沿 |
+        | 3 | ... | ... | ... | ... |
 
-        2. [[GNN-Driven High-Level Synthesis]] — 8.7/10
-           用图神经网络预测 HLS 设计空间中的 Pareto 前沿...
+        **结论与建议**: 今日论文主要聚焦 placement 和 HLS 两个方向。
+        第 1 篇与你的 "circuit design + transformer" 方向高度匹配，建议优先阅读。
 
-        3. ...
-
-        🟡 补充参考（12 篇）
-        ...
-
-        需要深入分析哪篇？直接告诉我序号或标题。
+        深入看哪篇？保存今日摘要？还是先这样？
 ```
 
 ##### 场景 2: 写代码时查论文
@@ -444,14 +448,15 @@ Claude: [调用 paper_search("attention placement engine circuit")]
 
         找到 6 篇相关论文：
 
-        | # | 标题                                      | 评分 |
-        |---|-------------------------------------------|------|
-        | 1 | AttentionPlacer: Transformer for Chip...   | 8.9  |
-        | 2 | Self-Attention Mechanisms in VLSI Layout   | 7.4  |
-        | 3 | DREAMPlace 4.0: Attention-Enhanced...      | 8.1  |
-        | ...                                                  |
+        | # | 标题 | 评分 | 关键词 | 一句话总结 |
+        |---|------|------|--------|-----------|
+        | 1 | AttentionPlacer: Transformer for Chip... | 8.9 | attention, placement | 首次将 cross-attention 用于 chip placement |
+        | 2 | Self-Attention Mechanisms in VLSI Layout | 7.4 | self-attention, VLSI | self-attention 用于 VLSI 布局优化 |
+        | 3 | DREAMPlace 4.0: Attention-Enhanced... | 8.1 | DREAMPlace, attention | DREAMPlace 加入 attention 机制 |
 
-        第 1 篇和你的方向最接近。要看详细分析吗？
+        **结论**: 第 1 篇和你的 attention-based placement engine 方向最接近，建议优先看。
+
+        要看详细分析吗？
 
 You: 第 1 篇展开
 

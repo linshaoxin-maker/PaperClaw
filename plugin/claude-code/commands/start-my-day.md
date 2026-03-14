@@ -1,41 +1,22 @@
 ---
-description: Collect latest arXiv papers and generate today's personalized digest
+description: One-call morning pipeline — context recovery, collect, digest, auto-mark
 allowed-tools: [
-  "mcp__plugin_paper-agent_paper-agent__paper_collect",
-  "mcp__plugin_paper-agent_paper-agent__paper_digest",
-  "mcp__plugin_paper-agent_paper-agent__paper_stats"
+  "mcp__paper-agent__paper_morning_brief",
+  "mcp__paper-agent__paper_show"
 ]
 ---
 
 # Start My Day
 
-Generate today's personalized paper digest.
+Generate today's personalized paper digest in one call.
 
 ## Process
 
-1. Call `paper_collect(days=1)` to fetch the latest papers from arXiv
-2. Call `paper_digest()` to generate today's recommendations
-3. Present results in Chinese with this structure:
-
-```
-## 今日概览
-
-今日推荐的 N 篇论文主要聚焦于 **{方向1}** 和 **{方向2}**。
-
-## 高置信推荐（N 篇）
-
-### 1. [[论文标题]]
-- **作者**：[作者列表]
-- **评分**：X.X/10
-- **链接**：[arXiv](链接)
-- **一句话总结**：[核心贡献]
-
-## 阅读建议
-
-建议先阅读第 X 篇了解 [方向]，再关注第 Y 篇的 [方法]。
-```
-
-## Error Handling
-
-- If library is empty, guide user to run `paper-agent init` and `paper-agent profile create` first
-- If collect returns 0 new papers, still generate digest from existing library
+1. Call `paper_morning_brief(days=1)` — this single tool does context + collect + digest + auto-mark
+2. Present results in Chinese:
+   - **今日概览**: new papers collected, scoring summary
+   - **高置信推荐**: top papers with title, score, one-line reason
+   - If mode is "workspace": mention auto-marked papers
+3. **ASK**: "深入看哪篇？保存今日摘要？还是先这样？"
+4. If user picks a paper, call `paper_show(paper_id)` for details
+5. If user wants to save, write digest to `daily/{YYYY-MM-DD}.md`

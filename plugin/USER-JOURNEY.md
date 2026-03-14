@@ -1,6 +1,6 @@
 # Paper Agent in Claude Code — 完整使用指南
 
-在 Claude Code 中使用 paper-agent 的详细旅程。从安装配置到 8 个 slash 命令的完整交互示例。
+在 Claude Code 中使用 paper-agent 的详细旅程。从安装配置到 10 个 slash 命令的完整交互示例。
 
 ---
 
@@ -41,14 +41,16 @@ my-research-project/
 ├── CLAUDE.md                      ← 告诉 AI 可用的工具
 └── .claude/
     └── commands/
-        ├── start-my-day.md        ← /start-my-day
+        ├── start-my-day.md        ← /start-my-day (one-call morning pipeline)
         ├── paper-search.md        ← /paper-search
         ├── paper-analyze.md       ← /paper-analyze
         ├── paper-collect.md       ← /paper-collect
         ├── paper-setup.md         ← /paper-setup
         ├── paper-compare.md       ← /paper-compare
-        ├── paper-survey.md        ← /paper-survey
-        └── paper-download.md      ← /paper-download
+        ├── paper-survey.md        ← /paper-survey (quick-first)
+        ├── paper-download.md      ← /paper-download
+        ├── paper-triage.md        ← /paper-triage (auto-classify)
+        └── paper-insight.md       ← /paper-insight (trend analysis)
 ```
 
 现在启动 Claude Code：
@@ -58,6 +60,25 @@ claude
 ```
 
 Claude Code 读取 `.mcp.json`，自动启动 `paper-agent-mcp` 后端。你就可以开始用了。
+
+---
+
+## 首次启动：自动检测
+
+第一次启动 Claude Code 时，AI 会自动检测你的配置状态：
+
+```
+You: 今天有什么新论文？
+
+Claude: 看起来你还没配置研究方向，我来帮你设置？
+        告诉我你的研究方向，我帮你一步搞定。
+
+You: 我做 EDA，关注 AI for placement 和 routing
+
+Claude: (进入 profile 配置流程，见下方 /paper-setup)
+```
+
+不需要记住先跑哪个命令。AI 检测到 profile 为空时会主动引导。
 
 ---
 
@@ -182,87 +203,49 @@ Claude: [调用 paper_digest()]
 
         📋 **今日论文推荐 — 2026-03-13**
 
-        ## 高置信推荐（6 篇）
+        **高置信推荐**（6 篇）
 
-        ### 1. [[RL-Placer: Deep RL for Chip Macro Placement]]
-        - **评分**: 9.2/10
-        - **作者**: Zhang et al. (PKU)
-        - **核心贡献**: 提出新的 RL 框架做 macro placement，在 ISPD 上比
-          传统方法快 3.2×
-        - → 跟你的 "placement + RL" 方向高度匹配
+        | # | 标题 | 评分 | 关键词 | 一句话总结 |
+        |---|------|------|--------|-----------|
+        | 1 | [[RL-Placer: Deep RL for Chip Macro Placement]] | 9.2 | RL, placement | 新 RL 框架做 macro placement，比传统方法快 3.2× |
+        | 2 | [[GNN-Driven Routing Optimization]] | 8.7 | GNN, routing | GNN 预测 routing congestion，减少 DRC 违规 45% |
+        | 3 | ... | ... | ... | ... |
 
-        ### 2. [[GNN-Driven Routing Optimization]]
-        - **评分**: 8.7/10
-        - **作者**: Li et al. (UCSD)
-        - **核心贡献**: 用 GNN 预测 routing congestion，减少 DRC 违规 45%
+        **结论与建议**: 今天的论文主要聚焦 placement 和 routing 两个方向。
+        第 1 篇跟你的 "placement + RL" 方向高度匹配，建议优先阅读。
 
-        ...（共 6 篇）
-
-        ## 补充参考（12 篇）
-        ...
-
-        需要深入看哪篇？告诉我序号或标题。
+        深入看哪篇？保存今日摘要？还是先这样？
 ```
 
 ---
 
-## 8 个 Slash 命令详解
+## 10 个 Slash 命令详解
 
 ### 1. `/start-my-day` — 每日开工
 
-每天早上用一次。先恢复上下文（你昨天在干什么），再收集新论文。
+每天早上用一次。一个工具调用完成：上下文恢复 + 收集 + 推荐 + 自动标记。
 
 ```
 You: /start-my-day
 
-Claude: 先看看你最近在研究什么...
-
-        [调用 paper_workspace_context()]
-
-        📋 **上下文恢复**
-        - 昨天搜索了 "RL placement" 相关论文（12 篇）
-        - 标记了 3 篇为"待读"，1 篇为"重要"
-        - 分组 "rl-placement" 有 7 篇论文
-        - 阅读进度：待读 5 | 阅读中 2 | 已读 8 | 重要 3
-
-        正在收集今日论文...
-
-        [调用 paper_collect(days=1)]
-
-        开始采集: arXiv(4) + DBLP(5) + S2(关键词) 并行 ...
-          ...
-        收集完成：47 篇新论文（三源去重），已完成 LLM 评分。
-
-        [调用 paper_digest()]
+Claude: [调用 paper_morning_brief(days=1)]
+        ← 一次调用完成全部：context + collect + digest + auto-mark
 
         📋 **今日论文推荐 — 2026-03-14**
 
-        ## 今日概览
-
-        今日推荐的 5 篇论文主要聚焦于 **电路布局优化** 和 **HLS 自动化**。
+        **收集**: 47 篇新论文（arXiv + DBLP + S2 三源去重），已完成评分。
+        **阅读进度**: 待读 5 | 阅读中 2 | 已读 8 | 重要 3
+        **已自动标记**: 前 5 篇高置信论文标为"待读"
 
         ## 高置信推荐（5 篇）
 
-        ### 1. [[Transformer-Based Placement Engine]]
-        - **作者**: Wang et al.
-        - **评分**: 9.1/10
-        - **链接**: [arXiv](https://arxiv.org/abs/2603.04567)
-        - **一句话总结**: 首次将 vision transformer 引入 chip placement
+        | # | 标题 | 评分 | 一句话 |
+        |---|------|------|--------|
+        | 1 | [[Transformer-Based Placement Engine]] | 9.1 | 首次将 ViT 引入 placement |
+        | 2 | [[Diffusion Models for VLSI Floorplanning]] | 8.5 | diffusion 生成 floorplan |
+        | 3 | ... | ... | ... |
 
-        ### 2. [[Diffusion Models for VLSI Floorplanning]]
-        - **作者**: Chen et al.
-        - **评分**: 8.5/10
-        - **链接**: [arXiv](https://arxiv.org/abs/2603.04321)
-        - **一句话总结**: 用 diffusion model 生成 floorplan 方案
-
-        ...
-
-        ## 阅读建议
-
-        建议先阅读第 1 篇了解 transformer 在 placement 中的新应用，
-        再关注第 2 篇的 diffusion 方法——这两种生成式方法的对比很有价值。
-
-        需要深入分析哪篇？
+        深入看哪篇？还是先这样？
 
 You: 第 1 篇展开
 
@@ -307,21 +290,16 @@ Claude: [调用 paper_search("attention mechanism for EDA")]
 
         找到 8 篇相关论文：
 
-        1. **AttentionPlacer: Cross-Attention for Chip Layout** — 评分 8.9/10
-           首次将 cross-attention 应用于 macro placement
+        | # | 标题 | 评分 | 关键词 | 一句话总结 |
+        |---|------|------|--------|-----------|
+        | 1 | [[AttentionPlacer: Cross-Attention for Chip Layout]] | 8.9 | attention, placement | 首次将 cross-attention 应用于 macro placement |
+        | 2 | [[Self-Attention in Logic Synthesis]] | 7.4 | attention, synthesis | 用 self-attention 优化逻辑综合流程 |
+        | 3 | [[Multi-Head Attention for Timing Analysis]] | 8.1 | attention, timing | attention 机制预测时序违规 |
+        | 4 | [[Transformer-EDA: A Survey]] | 8.6 | transformer, survey | EDA 领域 transformer 应用综述 |
 
-        2. **Self-Attention in Logic Synthesis** — 评分 7.4/10
-           用 self-attention 优化逻辑综合流程
+        **结论**: 搜索结果分为两个方向：(1) attention 在物理设计中的应用（第1、3篇）；(2) 综述和高层综合（第2、4篇）。建议从第4篇综述入手了解全貌。
 
-        3. **Multi-Head Attention for Timing Analysis** — 评分 8.1/10
-           attention 机制预测时序违规
-
-        4. **Transformer-EDA: A Survey** — 评分 8.6/10
-           EDA 领域 transformer 应用综述
-
-        ...
-
-        需要查看某篇的详细信息吗？告诉我编号。
+        需要查看某篇的详细信息吗？
 
 You: 看看第 4 篇
 
@@ -463,35 +441,22 @@ Claude: [调用 paper_show("arxiv:2603.04567")]
         **适用场景**
         适合中等规模（< 10K macros）的 placement 问题
 
-        ---
+        **结论与建议**: 这篇论文在 placement 领域有较高价值——全局感受野是核心创新点。
+        但 O(n²) 复杂度限制了规模，如果你的目标是大规模 standard cell placement，
+        可能需要结合分层策略。建议跟进作者后续工作。
 
-        分析完成。要保存笔记吗？
+        [自动调用 paper_note_add(paper_id, content, mark_as="reading")]
 
-You: 保存一下
+        已自动记录到工作区并标记为「阅读中」。
+        要导出分析笔记为文件？看引用链？还是先这样？
 
-Claude: [调用 paper_note_add(
-            paper_id="arxiv:2603.04567",
-            content="(上述完整分析内容)",
-            source="ai_analysis"
-        )]
+You: 导出一下
 
-        ✅ 笔记已保存！
-        - 数据库记录：note_id = abc123
-        - 文件同步：`.paper-agent/notes/e3f2a1b9c0d4.md`
-        - 研究日志已更新
+Claude: [写入 .paper-agent/notes/2603.04567.md]
 
-        打开 `.paper-agent/notes/` 就能看到。要继续分析其他论文吗？
+        ✅ 分析笔记已导出到 `.paper-agent/notes/2603.04567.md`
 
-You: 顺便标记为"阅读中"
-
-Claude: [调用 paper_reading_status(
-            paper_ids=["arxiv:2603.04567"],
-            status="reading"
-        )]
-
-        ✅ 已标记为"阅读中"。
-        阅读进度：待读 5 | **阅读中 3** | 已读 8 | 重要 3
-        reading-list.md 已更新。
+        要看引用链吗？或者继续分析其他论文？
 ```
 
 ---
@@ -992,6 +957,82 @@ Claude: [调用 paper_find_and_download(
 
 ---
 
+### 10. `/paper-triage` — 批量筛选（v03）
+
+自动将未读论文按 profile 相关度分为三档，一次确认即可。
+
+```
+You: /paper-triage
+
+Claude: [调用 paper_auto_triage(top_n=5)]
+        ← 基于已有评分自动分桶，无额外 LLM 调用
+
+        📋 **论文分类结果**
+
+        **重要**（5 篇，score >= 8）
+        | # | 标题 | 评分 | 原因 |
+        |---|------|------|------|
+        | 1 | [[RL-Placer]] | 9.2 | 跟 placement + RL 高度匹配 |
+        | 2 | [[ChipFormer]] | 8.7 | transformer 在 EDA 的新应用 |
+        | ... | | | |
+
+        **待读**（12 篇，score 5-7.9）
+        | ... |
+
+        **跳过**（30 篇，score < 5）
+        | ... |
+
+        这是按你 profile 的分类，同意吗？要调整哪些？
+
+You: 可以，就这样
+
+Claude: [调用 paper_reading_status(important_ids, "important")]
+        [调用 paper_reading_status(to_read_ids, "to_read")]
+
+        ✅ 5 篇标为"重要"，12 篇标为"待读"。
+```
+
+---
+
+### 11. `/paper-insight <topic>` — 趋势分析（v03）
+
+两个工具调用自动获取数据，AI 格式化成趋势报告。
+
+```
+You: /paper-insight graph neural network placement
+
+Claude: [调用 paper_quick_scan(topic="graph neural network placement", limit=20)]
+        [调用 paper_trend_data(topic="graph neural network placement", years_back=3)]
+
+        📊 **研究趋势: GNN Placement**
+
+        **总体趋势**: ↑ 上升（2024: 12 篇 → 2025: 23 篇 → 2026: 18 篇 YTD）
+
+        **子方向趋势**:
+        | 方向 | 2024 | 2025 | 2026 | 趋势 |
+        |------|------|------|------|------|
+        | GCN placement | 5 | 8 | 6 | → stable |
+        | GAT routing | 3 | 7 | 5 | ↑ up |
+        | heterogeneous GNN | 2 | 5 | 4 | ↑ up |
+
+        **Top 会议**: DAC (15), ICCAD (8), DATE (6)
+
+        **近期代表性工作**:
+        1. [[GraphPlacer: xxx]] (2026, 9.1分)
+        2. [[GAT-Route: xxx]] (2025, 8.5分)
+        ...
+
+        要深入某个子方向吗？还是先这样？
+
+You: GAT routing 展开看看
+
+Claude: → 切换到 literature-survey 工作流...
+        [调用 paper_quick_scan(topic="GAT routing EDA", limit=20)]
+        ...
+```
+
+---
+
 ## Workspace 功能
 
 v02 引入 **Workspace Layer**——`.paper-agent/` 目录下的一组 markdown 文件，
@@ -1356,14 +1397,15 @@ Claude Code 理解意图 → 确认/澄清
 
 Claude Code 在每个环节：
 - **记忆**：每次操作自动写入 research-journal.md，新会话自动恢复上下文
+- **首次检测**：自动检测 profile 和库状态，主动引导新用户
 - **理解**：把模糊的描述转化为精确的查询
-- **确认**：不确定时主动追问
-- **建议**：结果少时自动建议 diverse 搜索或在线搜索
+- **表格呈现**：论文列表一律用表格（标题+评分+关键词+一句话），不用 bullet list
+- **结论先行**：每个 workflow 输出必须包含「结论与建议」——告诉研究员数据意味着什么
 - **批量**：多方向任务用 `paper_search_batch` 一次搞定，不逐个调用
-- **呈现**：compact 格式精简输出，避免信息过载
+- **自动追踪**：工作区操作（笔记、标记、分组）自动执行，文件导出需确认
 - **持久化**：笔记、分组、引用链自动保存为 markdown 文件，人可读
-- **引导**：每步结束后建议下一步
-- **修改**：结果不满意时支持迭代
+- **引导**：每步结束后给出 2-3 个选项（含保存/导出），不留死胡同
+- **兜底**：库为空、搜索无结果、下载失败时给出友好提示和替代建议
 
 ---
 
@@ -1406,21 +1448,16 @@ Claude: LLM 评分失败：API key invalid
 | 场景 | CLI（终端） | Claude Code |
 |------|-----------|-------------|
 | 查论文 | `paper-agent search "query"` | "帮我查 xxx 论文" |
-| 关键词扩展 | `search "query" --diverse` | AI 自动建议 diverse 搜索 |
 | 在线搜索 | 不支持 | `paper_search_online`（arXiv + S2 并行） |
-| 每日推荐 | `collect -d 1 && digest`（两步） | `/start-my-day`（一步 + 上下文恢复） |
-| 多源采集 | `collect`（arXiv + DBLP + S2 并行） | `/paper-collect`（同上 + 进度日志） |
-| 分析论文 | `show <id>`（看原始数据） | `/paper-analyze`（结构化中文笔记） |
-| 保存笔记 | 自己复制粘贴 | `paper_note_add`（自动保存到 DB + 文件） |
-| 阅读状态 | 不支持 | `paper_reading_status`（待读/阅读中/已读/重要） |
-| 论文分组 | 不支持 | `paper_group_create/add`（分组 + 文件同步） |
-| 引用链 | 不支持 | `paper_citations`（S2 API + 自动入库 + 文件记录） |
-| 跨会话记忆 | 不支持 | `paper_workspace_context`（自动恢复上下文） |
-| 多篇对比 | 不支持 | `/paper-compare`（对比表格 + 分析） |
-| 批量搜索 | 不支持 | `paper_search_batch`（N 个方向一次搞定） |
-| 写综述 | 不支持 | `/paper-survey`（全流程引导） |
-| 批量下载 | 不支持 | `/paper-download`（一次传多个 ID） |
-| 按标题找论文 | 不支持 | 直接给标题，AI 自动从 S2 + arXiv 多源查找 + 下载 |
-| 上下文 | 需要在终端和 IDE 间切换 | AI 知道你在写什么代码 |
+| 每日推荐 | `collect -d 1 && digest`（两步） | `/start-my-day` = `paper_morning_brief`（一次调用完成全部） |
+| 分析论文 | `show <id>`（看原始数据） | `/paper-analyze`（结构化分析 + 自动存笔记 + 标记状态） |
+| 批量筛选 | 不支持 | `/paper-triage` = `paper_auto_triage`（自动三档分流） |
+| 引用追踪 | 不支持 | `paper_citation_trace`（递归 2 层，一次调用） |
+| 趋势分析 | 不支持 | `/paper-insight` = `paper_quick_scan` + `paper_trend_data` |
+| 写综述 | 不支持 | `/paper-survey` = `paper_quick_scan`（quick-first） |
+| 按标题找论文 | 不支持 | 给标题 → `paper_find_and_download` 多源查找 + 下载 |
+| 分组管理 | 不支持 | `paper_group_add(create_if_missing=True)`（一步到位） |
+| 笔记+标记 | 不支持 | `paper_note_add(mark_as="reading")`（一步两操作） |
+| 上下文 | 需要在终端和 IDE 间切换 | `paper_workspace_context`（含 mode 字段自动识别用户类型） |
 | 研究全貌 | 只能通过命令查 | 打开 `.paper-agent/` 目录即见 |
 | 语言 | 英文命令 + 英文输出 | 自然语言输入 + 中文输出 |
