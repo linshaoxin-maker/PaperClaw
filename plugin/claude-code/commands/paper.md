@@ -22,6 +22,8 @@ Unified entry point — help the researcher decide what to do.
 
    ### Slash 命令
 
+   **研究工作流**
+
    | # | 功能 | 说明 | 命令 |
    |---|------|------|------|
    | 1 | 每日推荐 | 收集今日论文 + 个性化推荐 | `/start-my-day` |
@@ -32,6 +34,13 @@ Unified entry point — help the researcher decide what to do.
    | 6 | 批量筛选 | 自动分流待读论文 | `/paper-triage` |
    | 7 | 论文对比 | 多篇论文横向对比 | `/paper-compare` |
    | 8 | 下载 PDF | 下载论文全文 | `/paper-download <ID>` |
+
+   **配置与采集**
+
+   | # | 功能 | 说明 | 命令 |
+   |---|------|------|------|
+   | 9 | 配置研究方向 | 对话式设定 topics / keywords / sources | `/paper-setup` |
+   | 10 | 采集论文 | 三源并行抓取 + LLM 评分 | `/paper-collect [天数]` |
 
    ### 自然语言触发
 
