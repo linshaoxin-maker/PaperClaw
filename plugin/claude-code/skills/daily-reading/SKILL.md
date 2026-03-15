@@ -8,21 +8,23 @@ description: Morning paper reading workflow. Triggers on "start my day", "今天
 ## Flow
 
 1. Call `paper_morning_brief(days=1)` — this single tool does context recovery + collect + digest + auto-mark in one call
-2. Present as structured table:
+2. Call `paper_watch_digest()` — check for watchlist updates
+3. Present as structured tables:
 
    **今日推荐** (N 篇):
    | # | 标题 | 评分 | 关键词 | 一句话总结 |
+
+   **Watchlist 更新** (if any):
+   | 跟踪项 | 类型 | 新论文数 | 最相关论文 |
+
    **结论与建议**: 今日最值得关注的方向和论文，建议阅读顺序
 
-3. **[FORK]** "深入看哪篇？保存今日摘要？还是先这样？"
+4. **Auto-save**: call `paper_save_report(report_type="daily_digest", content=<digest markdown>, filename="{YYYY-MM-DD}.md")` using the daily-digest-template. Tell user the saved path.
+5. **[FORK]** "今日摘要已保存至 {path}。深入看哪篇？还是先这样？"
 
 ## If user picks a paper
 
 Hand off to the **deep-dive** skill with the selected paper ID.
-
-## If user wants to save
-
-Write the digest to `daily/{YYYY-MM-DD}.md` using the daily-digest-template.
 
 ## Workspace behavior
 

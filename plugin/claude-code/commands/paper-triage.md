@@ -3,6 +3,7 @@ description: Batch paper screening — auto-classify into important/to_read/skip
 allowed-tools: [
   "mcp__paper-agent__paper_auto_triage",
   "mcp__paper-agent__paper_reading_status",
+  "mcp__paper-agent__paper_save_report",
   "Read"
 ]
 ---
@@ -34,4 +35,5 @@ Batch screening of papers using profile-based relevance scores.
    **结论**: 为什么这几篇最值得关注（关联用户 profile 说明）
 3. **ASK**: "这是按你 profile 的分类，同意吗？要调整哪些？"
 4. Apply status marks per user's confirmation/adjustment
-5. **ASK**: "已标记完成。要保存筛选报告？还是先这样？"
+5. **Auto-save**: call `paper_save_report(report_type="triage", content=<report markdown>, filename="{topic}-{YYYY-MM-DD}.md")` to persist the triage report
+6. Tell user: "📄 筛选报告已保存至 {path}。要深入看哪篇？"

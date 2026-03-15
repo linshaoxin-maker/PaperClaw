@@ -7,6 +7,7 @@ allowed-tools: [
   "mcp__paper-agent__paper_compare",
   "mcp__paper-agent__paper_export",
   "mcp__paper-agent__paper_group_add",
+  "mcp__paper-agent__paper_save_report",
   "Read",
   "Write"
 ]
@@ -34,8 +35,10 @@ Generate survey narrative in Chinese with structured tables:
 - **研究空白与趋势**: open problems, emerging directions
 - **结论与建议**: 当前方向的成熟度判断、主流方法对比结论、研究机会在哪里
 
-### Step 3 — After results
+### Step 3 — Auto-save
 
-**ASK**: "要修改、补充、还是导出？（BibTeX / Markdown / 保存综述）"
+Call `paper_save_report(report_type="survey", content=<survey markdown>, filename="{topic}.md")` to persist the survey.
+
+Tell user: "📄 文献综述已保存至 {path}。要修改、补充、还是导出 BibTeX？"
 
 Default is quick mode (20 candidates). Full mode (40+) only when user explicitly asks.

@@ -13,11 +13,18 @@ from paper_agent.infra.llm.llm_provider import LLMProvider
 from paper_agent.infra.sources.source_registry import SourceRegistry
 from paper_agent.infra.storage.sqlite_storage import SQLiteStorage
 from paper_agent.services.collection_manager import CollectionManager
+from paper_agent.services.credibility_assessor import CredibilityAssessor
 from paper_agent.services.digest_generator import DigestGenerator
+from paper_agent.services.extraction_engine import ExtractionEngine
+from paper_agent.services.feedback_manager import FeedbackManager
 from paper_agent.services.filtering_manager import FilteringManager
 from paper_agent.services.citation_service import CitationService
+from paper_agent.services.pdf_processor import PdfProcessor
+from paper_agent.services.research_engine import ResearchEngine
+from paper_agent.services.research_planner import ResearchPlanner
 from paper_agent.services.search_engine import SearchEngine
 from paper_agent.services.source_collector import SourceCollector
+from paper_agent.services.watchlist_manager import WatchlistManager
 from paper_agent.services.workspace_manager import WorkspaceManager
 
 
@@ -96,7 +103,10 @@ class AppContext:
             debug_log = lambda msg: console.print(f"[dim] {msg}[/dim]")
             progress_log = lambda msg: console.print(f"  {msg}")
 
+        from paper_agent.infra.sources.acl_anthology_adapter import ACLAnthologyAdapter
         from paper_agent.infra.sources.dblp_adapter import DBLPAdapter
+        from paper_agent.infra.sources.openalex_adapter import OpenAlexAdapter
+        from paper_agent.infra.sources.openreview_adapter import OpenReviewAdapter
         from paper_agent.infra.sources.semantic_scholar_adapter import SemanticScholarAdapter
 
         adapter_kwargs = {
@@ -107,6 +117,9 @@ class AppContext:
             source_collector=self.source_collector,
             s2_adapter=SemanticScholarAdapter(**adapter_kwargs),
             dblp_adapter=DBLPAdapter(**adapter_kwargs),
+            openreview_adapter=OpenReviewAdapter(**adapter_kwargs),
+            acl_adapter=ACLAnthologyAdapter(**adapter_kwargs),
+            openalex_adapter=OpenAlexAdapter(**adapter_kwargs),
             debug=self._debug,
             debug_log=debug_log,
             progress_log=progress_log,
@@ -138,3 +151,37 @@ class AppContext:
     @cached_property
     def citation_service(self) -> CitationService:
         return CitationService(self.storage)
+
+    @cached_property
+    def pdf_processor(self) -> PdfProcessor:
+        return PdfProcessor(self.storage)
+
+    @cached_property
+    def extraction_engine(self) -> ExtractionEngine:
+        return ExtractionEngine(self.storage, self.llm)
+
+    @cached_property
+    def research_engine(self) -> ResearchEngine:
+        profile = None
+        try:
+            profile = self.config
+        except Exception:
+            pass
+        return ResearchEngine(self.search_engine, self.llm, profile=profile)
+
+    @cached_property
+    def feedback_manager(self) -> FeedbackManager:
+        return FeedbackManager(self.storage)
+
+    @cached_property
+    def watchlist_manager(self) -> WatchlistManager:
+        return WatchlistManager(self.storage)
+
+    @cached_property
+    def credibility_assessor(self) -> CredibilityAssessor:
+        return CredibilityAssessor(self.storage, self.llm)
+
+    @cached_property
+    def research_planner(self) -> ResearchPlanner:
+        context = self.storage.get_research_context() or {}
+        return ResearchPlanner(self.storage, self.llm, research_context=context)

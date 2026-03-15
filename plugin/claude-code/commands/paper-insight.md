@@ -4,6 +4,7 @@ argument-hint: <topic>
 allowed-tools: [
   "mcp__paper-agent__paper_quick_scan",
   "mcp__paper-agent__paper_trend_data",
+  "mcp__paper-agent__paper_save_report",
   "Read"
 ]
 ---
@@ -33,4 +34,5 @@ Quick trend analysis for a research topic.
    |---|------|------|------|--------|
 
    **结论与建议**: 这个方向整体趋势判断，哪些子方向在上升/下降，当前入场的时机建议
-5. **ASK**: "要深入某个子方向？导出分析报告？还是先这样？"
+5. **Auto-save**: call `paper_save_report(report_type="insight", content=<insight markdown>, filename="{topic}-{YYYY-MM-DD}.md")` to persist the insight report
+6. Tell user: "📄 趋势洞察已保存至 {path}。要深入某个子方向？还是先这样？"

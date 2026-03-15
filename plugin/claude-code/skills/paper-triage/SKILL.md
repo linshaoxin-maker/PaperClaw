@@ -11,11 +11,12 @@ description: Batch paper screening and classification. Triggers on "筛一下", 
    - If user explicitly references existing papers ("筛一下刚才的", "帮我筛这些", "筛这些"): triage those directly → `paper_auto_triage(paper_ids=[...])`
    - If papers in context but reference is ambiguous: ASK "要筛选刚才找到的这些论文？还是筛选库里最近的未读论文？"
    - If no context → default to `paper_auto_triage(top_n=5)`
-2. Present the three buckets as tables:
+2. **Credibility check**: For papers in the "important" bucket, call `paper_credibility_batch(important_ids)` to add credibility signals.
+3. Present the three buckets as tables:
 
-   **⭐ 重要**: | # | 标题 | 评分 | 入选理由 |
-   **📖 待读**: | # | 标题 | 评分 | 简评 |
-   **⏭️ 跳过**: | # | 标题 | 评分 | 跳过理由 |
+   **重要**: | # | 标题 | 评分 | 入选理由 | venue | code | 复现风险 |
+   **待读**: | # | 标题 | 评分 | 简评 |
+   **跳过**: | # | 标题 | 评分 | 跳过理由 |
    **结论**: 为什么这几篇最值得关注，关联用户 profile 说明
 
 3. **[FORK]** "这是按你 profile 的分类，同意吗？要调整哪些？"
@@ -33,11 +34,9 @@ Apply the auto-triage result directly:
 - Mark to_read papers as "to_read"
 - Skip papers get no status change
 
-After marking, **[FORK]** "已标记完成。要保存筛选报告？还是先这样？"
+After marking, **auto-save**: call `paper_save_report(report_type="triage", content=<report markdown>, filename="{topic}-{YYYY-MM-DD}.md")` using triage-template.
 
-## If user wants to save
-
-Write triage report to `triage/{topic}-{YYYY-MM-DD}.md` using triage-template.
+**[FORK]** "已标记完成，筛选报告已保存至 {path}。要深入看哪篇？还是先这样？"
 
 ## Custom source
 

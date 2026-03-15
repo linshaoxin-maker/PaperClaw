@@ -44,10 +44,29 @@ _COLLECTION_INDEX_TEMPLATE = """# Paper Collections
 """
 
 
+_REPORT_TYPE_MAP: dict[str, str] = {
+    "daily_digest": "daily",
+    "triage": "triage",
+    "survey": "survey",
+    "insight": "insight",
+    "comparison": "compare",
+    "analysis": "notes",
+    "citation_map": "citation-traces",
+    "reading_pack": "reading-packs",
+    "ideation": "ideas",
+    "experiment_plan": "experiment-plans",
+    "search_result": "search-results",
+}
+
+
 class WorkspaceManager:
     """Manages the .paper-agent/ workspace directory."""
 
-    DIRS = ("collections", "notes", "citation-traces")
+    DIRS = (
+        "collections", "notes", "citation-traces",
+        "daily", "triage", "survey", "insight", "compare", "reading-packs",
+        "ideas", "experiment-plans", "search-results",
+    )
     FILES = ("research-journal.md", "reading-list.md")
 
     def __init__(self, workspace_dir: Path, storage: SQLiteStorage | None = None) -> None:
@@ -181,6 +200,37 @@ class WorkspaceManager:
                     lines.append(f"- {e}")
             else:
                 lines.append("(暂无活动)")
+            lines.append("")
+
+        report_dirs = {
+            "daily": "每日摘要",
+            "triage": "筛选报告",
+            "survey": "文献综述",
+            "insight": "趋势洞察",
+            "compare": "对比分析",
+            "reading-packs": "阅读包",
+            "ideas": "研究 Ideas",
+            "experiment-plans": "实验计划",
+            "search-results": "搜索结果",
+        }
+        has_reports = False
+        for subdir, label in report_dirs.items():
+            d = self._root / subdir
+            if d.is_dir():
+                files = sorted(d.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if files:
+                    if not has_reports:
+                        lines.append("## 研究报告\n")
+                        has_reports = True
+                    lines.append(f"### {label} ({len(files)} 份)\n")
+                    for f in files[:5]:
+                        lines.append(f"- [{f.stem}]({subdir}/{f.name})")
+                    if len(files) > 5:
+                        lines.append(f"- ... 还有 {len(files) - 5} 份")
+                    lines.append("")
+        if not has_reports:
+            lines.append("## 研究报告\n")
+            lines.append("(暂无报告)")
             lines.append("")
 
         lines.append("---\n")
@@ -422,6 +472,94 @@ class WorkspaceManager:
         path.write_text(content, encoding="utf-8")
         return path
 
+    # ── Reports ──
+
+    def save_report(
+        self,
+        report_type: str,
+        content: str,
+        filename: str | None = None,
+    ) -> Path:
+        """Save a structured report to the appropriate subdirectory.
+
+        Returns the path of the written file.
+        Raises ValueError for unknown report types.
+        """
+        self.ensure_initialized()
+        subdir = _REPORT_TYPE_MAP.get(report_type)
+        if subdir is None:
+            raise ValueError(
+                f"Unknown report_type '{report_type}'. "
+                f"Valid types: {', '.join(sorted(_REPORT_TYPE_MAP))}"
+            )
+
+        target_dir = self._root / subdir
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        if filename:
+            safe = re.sub(r"[^\w\-.]", "_", filename)
+            if not safe.endswith(".md"):
+                safe += ".md"
+        else:
+            today = datetime.now().strftime("%Y-%m-%d")
+            safe = f"{today}.md"
+
+        path = target_dir / safe
+        path.write_text(content, encoding="utf-8")
+
+        label_map = {
+            "daily_digest": "每日摘要",
+            "triage": "筛选报告",
+            "survey": "文献综述",
+            "insight": "趋势洞察",
+            "comparison": "对比分析",
+            "analysis": "深度分析",
+            "citation_map": "引用图谱",
+            "reading_pack": "阅读包",
+            "ideation": "研究 Ideas",
+            "experiment_plan": "实验计划",
+            "search_result": "搜索结果",
+        }
+        label = label_map.get(report_type, report_type)
+        self.append_journal(
+            f"保存{label}: {path.name}",
+            {"路径": str(path.relative_to(self._root)), "类型": report_type},
+        )
+        return path
+
+    def list_reports(self, report_type: str | None = None) -> list[dict[str, Any]]:
+        """List saved reports, optionally filtered by type.
+
+        Returns a list of dicts with keys: type, filename, path, modified.
+        """
+        if not self.is_initialized():
+            return []
+
+        types_to_scan: dict[str, str]
+        if report_type:
+            subdir = _REPORT_TYPE_MAP.get(report_type)
+            if subdir is None:
+                return []
+            types_to_scan = {report_type: subdir}
+        else:
+            types_to_scan = dict(_REPORT_TYPE_MAP)
+
+        results: list[dict[str, Any]] = []
+        for rtype, subdir in types_to_scan.items():
+            d = self._root / subdir
+            if not d.is_dir():
+                continue
+            for f in sorted(d.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+                if f.name.startswith("_"):
+                    continue
+                results.append({
+                    "type": rtype,
+                    "filename": f.name,
+                    "path": str(f),
+                    "modified": datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
+                })
+        return results
+
     # ── Context Recovery ──
 
     def get_context(self) -> dict[str, Any]:
@@ -447,6 +585,16 @@ class WorkspaceManager:
             result["citation_traces"] = [
                 f.stem for f in traces_dir.glob("*.md")
             ]
+
+        report_counts: dict[str, int] = {}
+        for rtype, subdir in _REPORT_TYPE_MAP.items():
+            d = self._root / subdir
+            if d.is_dir():
+                count = sum(1 for f in d.glob("*.md") if not f.name.startswith("_"))
+                if count:
+                    report_counts[rtype] = count
+        if report_counts:
+            result["report_counts"] = report_counts
 
         return result
 

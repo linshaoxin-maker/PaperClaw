@@ -25,6 +25,8 @@ allowed-tools: [
   "mcp__paper-agent__paper_sources_enable",
   "mcp__paper-agent__paper_templates_list",
   "mcp__paper-agent__paper_health",
+  "mcp__paper-agent__paper_save_report",
+  "mcp__paper-agent__paper_list_reports",
   "Read",
   "Write"
 ]

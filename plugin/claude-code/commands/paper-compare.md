@@ -5,6 +5,7 @@ allowed-tools: [
   "mcp__paper-agent__paper_batch_show",
   "mcp__paper-agent__paper_compare",
   "mcp__paper-agent__paper_export",
+  "mcp__paper-agent__paper_save_report",
   "Write"
 ]
 ---
@@ -37,6 +38,8 @@ Call `paper_compare(paper_ids, aspects)` and generate tables in Chinese:
 
 **结论与建议**: 明确判断哪种方法在什么场景下最优，给出选型建议
 
-### Step 3 — After results
+### Step 3 — Auto-save
 
-ASK: "要保存对比表格吗？或者基于这些写 survey？"
+Call `paper_save_report(report_type="comparison", content=<comparison markdown>, filename="{short_title}-{YYYY-MM-DD}.md")` to persist the comparison report.
+
+Tell user: "📄 对比报告已保存至 {path}。要基于这些写 survey？还是先这样？"

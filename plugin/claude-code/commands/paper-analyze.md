@@ -5,6 +5,7 @@ allowed-tools: [
   "mcp__paper-agent__paper_show",
   "mcp__paper-agent__paper_search",
   "mcp__paper-agent__paper_note_add",
+  "mcp__paper-agent__paper_save_report",
   "Bash",
   "Read",
   "Write"
@@ -33,4 +34,5 @@ Generate a structured deep-analysis note for a paper.
    - **与相关论文对比**: comparison table (| 维度 | 本文 | 对比1 | 对比2 |)
    - **结论与建议**: 研究价值判断 + 与用户研究方向的关联 + 值不值得深入跟进
 5. Auto-track: call `paper_note_add(paper_id, content, mark_as="reading")` to save to workspace
-6. **ASK**: "要导出分析笔记为文件？看引用链？还是先这样？"
+6. **Auto-save**: call `paper_save_report(report_type="analysis", content=<analysis markdown>, filename="{paper_id}.md")` to persist the analysis note as a file
+7. Tell user: "📄 分析笔记已保存至 {path}。要看引用链？还是先这样？"

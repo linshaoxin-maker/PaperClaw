@@ -14,7 +14,8 @@ description: Citation chain exploration. Triggers on "引用链", "谁引了", "
    **引用树**: seed → level 1 → level 2 (text tree)
    **关键节点**: | 论文 | 年份 | 方向 | 被引 | 关系 |
    **结论**: 哪些是领域关键节点，引用链揭示了什么研究脉络
-3. **[FORK]** "要继续追踪某篇？加到分组？导出引用图谱？还是先这样？"
+3. **Auto-save**: call `paper_save_report(report_type="citation_map", content=<citation tree markdown>, filename="{seed_id}.md")` to persist the citation map.
+4. **[FORK]** "引用图谱已保存至 {path}。要继续追踪某篇？加到分组？还是先这样？"
 
 ## If user picks a paper to trace further
 
@@ -24,10 +25,9 @@ Call `paper_citation_trace(new_paper_id)` again for the selected paper.
 
 Call `paper_group_add(name="citation-{seed_title}", paper_ids=[...], create_if_missing=True)`.
 
-## If user wants to export
+## If user wants BibTeX export
 
-Write citation tree to `.paper-agent/citation-traces/{seed_id}.md` or user-specified path.
-Optionally `paper_export(paper_ids, format="bibtex")` for references.
+Call `paper_export(paper_ids, format="bibtex")` for references.
 
 ## Rules
 

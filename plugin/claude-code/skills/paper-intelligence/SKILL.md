@@ -24,6 +24,17 @@ Call `paper_workspace_context()` first. Read the `mode` field:
 | "引用链" / "谁引了这篇" / "citation" | `paper_citation_trace` tool directly |
 | "筛一下" / "triage" / "哪些值得看" | `paper_auto_triage` tool directly |
 | "趋势" / "trend" / "这个方向火不火" | research-insight skill |
+| Research question (e.g. "RL做placement还有没有新意？") | `paper_research` tool directly |
+| "这篇可信吗" / "能不能复现" / "credibility" | `paper_credibility` tool directly |
+| "跟踪这个方向" / "watch" / "关注这个作者" | `paper_watch` tool directly |
+| "我觉得这篇不行" / "这类少推" / feedback | `paper_feedback` tool directly |
+| "这篇能给我什么启发" / "research ideas" | research-planning skill (ideation mode) |
+| "实验计划" / "能怎么复现改进" / "experiment plan" | research-planning skill (experiment mode) |
+| "给我组个 reading pack" / "怎么读" | research-planning skill (reading pack mode) |
+| "保存搜索结果" / "存一下这个列表" | `paper_save_report` tool directly |
+| "推荐和我课题相关的" / "recommend" | `paper_recommend` tool directly |
+| "抽取结构化信息" / "extract" / "比较表格" | `paper_extract` or `paper_compare_table` |
+| "看看保存的报告" / "有哪些综述" / "list reports" | `paper_list_reports` tool directly |
 | Direct search keywords | `paper_search` or `paper_quick_scan` |
 
 ## Interaction Rules
@@ -37,4 +48,4 @@ Call `paper_workspace_context()` first. Read the `mode` field:
 - When routing to a tool directly (morning_brief, auto_triage, citation_trace), call it and present results. No extra questions.
 - When routing to a skill, follow that skill's fork-only checkpoints.
 - Never list more than 3 options. Prefer smart default + "或者？"
-- Workspace operations (note_add, reading_status, group_add) are automatic. File export is opt-in via each workflow's FORK.
+- Workspace operations (note_add, reading_status, group_add) are automatic. Report saving via `paper_save_report` is automatic in each workflow. Additional export (BibTeX) is opt-in via each workflow's FORK.

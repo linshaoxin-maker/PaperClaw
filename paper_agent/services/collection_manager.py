@@ -1,11 +1,14 @@
 """Collection service: orchestrate paper ingestion from multiple sources.
 
-Collection strategy (three-way concurrent):
-  - arXiv  → ArxivAdapter per-category (preprints, daily freshness)
-  - DBLP   → DBLPAdapter per-venue (conference proceedings, complete index)
-  - S2     → SemanticScholarAdapter.discover() (keyword search + citation network)
+Collection strategy (six-way concurrent):
+  - arXiv       → ArxivAdapter per-category (preprints, daily freshness)
+  - DBLP        → DBLPAdapter per-venue (conference proceedings, complete index)
+  - S2          → SemanticScholarAdapter.discover() (keyword search + citation network)
+  - OpenReview  → OpenReviewAdapter (NeurIPS/ICML/ICLR accepted papers with reviews)
+  - ACL Anth.   → ACLAnthologyAdapter (ACL/EMNLP/NAACL/COLING full text + metadata)
+  - OpenAlex    → OpenAlexAdapter (250M+ works, free academic graph)
 
-All three run concurrently via ThreadPoolExecutor.
+All tracks run concurrently via ThreadPoolExecutor.
 Results are merged and deduplicated by canonical_key.
 """
 
@@ -18,8 +21,11 @@ from datetime import datetime, timedelta, timezone
 from paper_agent.app.config_manager import ConfigProfile
 from paper_agent.domain.models.collection import CollectionRecord
 from paper_agent.domain.models.paper import Paper
+from paper_agent.infra.sources.acl_anthology_adapter import ACLAnthologyAdapter
 from paper_agent.infra.sources.arxiv_adapter import ArxivAdapter
 from paper_agent.infra.sources.dblp_adapter import DBLPAdapter
+from paper_agent.infra.sources.openalex_adapter import OpenAlexAdapter
+from paper_agent.infra.sources.openreview_adapter import OpenReviewAdapter
 from paper_agent.infra.sources.semantic_scholar_adapter import SemanticScholarAdapter
 from paper_agent.infra.sources.source_registry import SourceDefinition
 from paper_agent.infra.storage.sqlite_storage import SQLiteStorage
@@ -33,6 +39,9 @@ class CollectionManager:
         source_collector: SourceCollector | None = None,
         s2_adapter: SemanticScholarAdapter | None = None,
         dblp_adapter: DBLPAdapter | None = None,
+        openreview_adapter: OpenReviewAdapter | None = None,
+        acl_adapter: ACLAnthologyAdapter | None = None,
+        openalex_adapter: OpenAlexAdapter | None = None,
         debug: bool = False,
         debug_log: Callable[[str], None] | None = None,
         progress_log: Callable[[str], None] | None = None,
@@ -48,6 +57,9 @@ class CollectionManager:
         self._s2 = s2_adapter or SemanticScholarAdapter(**adapter_kwargs)
         self._dblp = dblp_adapter or DBLPAdapter(**adapter_kwargs)
         self._arxiv = ArxivAdapter(**adapter_kwargs)
+        self._openreview = openreview_adapter or OpenReviewAdapter(**adapter_kwargs)
+        self._acl = acl_adapter or ACLAnthologyAdapter(**adapter_kwargs)
+        self._openalex = openalex_adapter or OpenAlexAdapter(**adapter_kwargs)
 
     def _log(self, message: str) -> None:
         if self._debug and self._debug_log is not None:
@@ -59,7 +71,7 @@ class CollectionManager:
         elif self._debug and self._debug_log is not None:
             self._debug_log(message)
 
-    # ── Smart multi-source collection (three-way) ──
+    # ── Smart multi-source collection (six-way) ──
 
     def collect_from_sources(
         self,
@@ -70,43 +82,69 @@ class CollectionManager:
     ) -> CollectionRecord:
         """Collect papers from all enabled sources concurrently.
 
-        Three parallel tracks:
-          1. arXiv sources → per-category via SourceCollector
-          2. DBLP conference sources → per-venue proceedings
-          3. S2 keyword discovery → profile keywords + venue filter
+        Six parallel tracks (each runs only if matching sources exist):
+          1. arXiv     → per-category preprint search
+          2. OpenReview → NeurIPS/ICML/ICLR accepted papers
+          3. ACL Anth. → ACL/EMNLP/NAACL proceedings
+          4. DBLP      → all other conference proceedings
+          5. S2        → keyword discovery across citation network
+          6. OpenAlex  → broad academic graph search
         """
         since = datetime.now(timezone.utc) - timedelta(days=days_back)
         record = CollectionRecord(source_name="multi", trigger_type="manual")
 
         arxiv_sources = [s for s in sources if s.api_type == "arxiv" and s.enabled]
-        # All conferences go through DBLP (it indexes all CS conferences)
         conf_sources = [s for s in sources if s.type == "conference" and s.enabled]
-        dblp_sources = conf_sources
+
+        openreview_sources = [s for s in conf_sources if s.api_type == "openreview"]
+        acl_sources = [s for s in conf_sources if s.api_type == "acl_anthology"]
+        dblp_sources = [s for s in conf_sources if s.api_type == "dblp"]
+        # Conferences without a native adapter also go through DBLP
+        other_conf = [s for s in conf_sources if s.api_type not in ("openreview", "acl_anthology", "dblp")]
+        dblp_sources = dblp_sources + other_conf
 
         tracks = []
         if arxiv_sources:
             tracks.append(f"arXiv({len(arxiv_sources)})")
+        if openreview_sources:
+            tracks.append(f"OpenReview({len(openreview_sources)})")
+        if acl_sources:
+            tracks.append(f"ACL({len(acl_sources)})")
         if dblp_sources:
             tracks.append(f"DBLP({len(dblp_sources)})")
         if conf_sources and profile:
             tracks.append("S2(关键词)")
+        if profile and (profile.topics or profile.keywords):
+            tracks.append("OpenAlex(关键词)")
+
         self._progress(f"开始采集: {' + '.join(tracks)} 并行 ...")
         self._log(
             f"Multi-source collection: {len(arxiv_sources)} arXiv, "
-            f"{len(dblp_sources)} DBLP, {len(conf_sources)} conf (for S2), "
+            f"{len(openreview_sources)} OpenReview, {len(acl_sources)} ACL, "
+            f"{len(dblp_sources)} DBLP, S2+OpenAlex(关键词), "
             f"days_back={days_back}, since={since.isoformat()}"
         )
 
         all_papers: list[Paper] = []
         errors: dict[str, str] = {}
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=6) as executor:
             futures: dict = {}
 
             if arxiv_sources:
                 futures[executor.submit(
                     self._collect_arxiv, arxiv_sources, since, max_results
                 )] = "arxiv"
+
+            if openreview_sources:
+                futures[executor.submit(
+                    self._collect_openreview, openreview_sources, since, max_results
+                )] = "openreview"
+
+            if acl_sources:
+                futures[executor.submit(
+                    self._collect_acl, acl_sources, since, max_results
+                )] = "acl_anthology"
 
             if dblp_sources:
                 futures[executor.submit(
@@ -119,6 +157,13 @@ class CollectionManager:
                 futures[executor.submit(
                     self._collect_s2, keywords, venue_names, since, max_results
                 )] = "semantic_scholar"
+
+            if profile and (profile.topics or profile.keywords):
+                keywords = (profile.topics or []) + (profile.keywords or [])
+                venue_names = [s.display_name for s in conf_sources] if conf_sources else []
+                futures[executor.submit(
+                    self._collect_openalex, keywords, venue_names, since, max_results
+                )] = "openalex"
 
             for future in as_completed(futures):
                 source_type = futures[future]
@@ -167,8 +212,9 @@ class CollectionManager:
     ) -> CollectionRecord:
         """Retrospective survey: collect papers on a topic over multiple years.
 
-        Three-way concurrent search optimized for breadth:
+        Four-way concurrent search optimized for breadth:
           - S2: keyword search across years (semantic relevance + citations)
+          - OpenAlex: broad academic graph search (250M+ works)
           - DBLP: full venue proceedings for the period (completeness)
           - arXiv: keyword search across years (preprints)
 
@@ -193,19 +239,23 @@ class CollectionManager:
         all_papers: list[Paper] = []
         errors: dict[str, str] = {}
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             futures: dict = {}
 
             futures[executor.submit(
                 self._collect_s2, keywords, venues or [], since, max_results
             )] = "semantic_scholar"
 
+            futures[executor.submit(
+                self._collect_openalex, keywords, venues or [], since, max_results
+            )] = "openalex"
+
             if venues:
                 from paper_agent.infra.sources.source_registry import SourceRegistry
                 registry = SourceRegistry()
                 dblp_sources = []
                 for src in registry.list_sources():
-                    if src.api_type == "dblp" and src.display_name in venues:
+                    if src.type == "conference" and src.display_name in venues:
                         dblp_sources.append(src)
                 if dblp_sources:
                     futures[executor.submit(
@@ -276,6 +326,26 @@ class CollectionManager:
         "emnlp": "conf/emnlp",
         "naacl": "conf/naacl",
         "coling": "conf/coling",
+        "eacl": "conf/eacl",
+        "findings": "conf/acl",
+        "icse": "conf/icse",
+        "fse": "conf/sigsoft",
+        "ase": "conf/kbse",
+        "issta": "conf/issta",
+        "msr": "conf/msr",
+        "saner": "conf/wcre",
+        "issre": "conf/issre",
+        "sigir": "conf/sigir",
+        "kdd": "conf/kdd",
+        "www": "conf/www",
+        "wsdm": "conf/wsdm",
+        "cikm": "conf/cikm",
+        "recsys": "conf/recsys",
+        "osdi": "conf/osdi",
+        "sosp": "conf/sosp",
+        "sigmod": "conf/sigmod",
+        "vldb": "conf/vldb",
+        "aamas": "conf/atal",
     }
 
     def _resolve_dblp_venue_key(self, src: SourceDefinition) -> str:
@@ -287,6 +357,66 @@ class CollectionManager:
         # Try to infer from source id (e.g. "conf:neurips" → "conf/nips")
         conf_id = src.id.split(":")[-1] if ":" in src.id else ""
         return self._DBLP_VENUE_MAP.get(conf_id, "")
+
+    def _collect_openreview(
+        self, sources: list[SourceDefinition], since: datetime, max_results: int
+    ) -> list[Paper]:
+        """Collect from OpenReview venues (NeurIPS, ICML, ICLR)."""
+        import time
+
+        papers: list[Paper] = []
+        for i, src in enumerate(sources):
+            if len(papers) >= max_results:
+                break
+            api_config = src.api_config or {}
+            venue_id = api_config.get("venue_id", "")
+            if not venue_id:
+                self._log(f"OpenReview: no venue_id for {src.display_name}, skipping")
+                continue
+            self._progress(f"OpenReview: 抓取 {src.display_name} ({venue_id}) ...")
+            try:
+                batch = self._openreview.collect(
+                    api_config=api_config,
+                    since=since,
+                    max_results=max_results - len(papers),
+                )
+                papers.extend(batch)
+                self._log(f"OpenReview {src.display_name}: {len(batch)} papers")
+            except Exception as e:
+                self._log(f"OpenReview {src.display_name} failed: {e}")
+            if i < len(sources) - 1:
+                time.sleep(self._openreview.rate_limit_delay)
+        return papers
+
+    def _collect_acl(
+        self, sources: list[SourceDefinition], since: datetime, max_results: int
+    ) -> list[Paper]:
+        """Collect from ACL Anthology venues (ACL, EMNLP, NAACL, etc.)."""
+        import time
+
+        papers: list[Paper] = []
+        for i, src in enumerate(sources):
+            if len(papers) >= max_results:
+                break
+            api_config = src.api_config or {}
+            venue_key = api_config.get("venue_key", "")
+            if not venue_key:
+                self._log(f"ACL: no venue_key for {src.display_name}, skipping")
+                continue
+            self._progress(f"ACL Anthology: 抓取 {src.display_name} ({venue_key}) ...")
+            try:
+                batch = self._acl.collect(
+                    api_config=api_config,
+                    since=since,
+                    max_results=max_results - len(papers),
+                )
+                papers.extend(batch)
+                self._log(f"ACL {src.display_name}: {len(batch)} papers")
+            except Exception as e:
+                self._log(f"ACL {src.display_name} failed: {e}")
+            if i < len(sources) - 1:
+                time.sleep(self._acl.rate_limit_delay)
+        return papers
 
     def _collect_dblp(
         self, sources: list[SourceDefinition], since: datetime, max_results: int
@@ -327,6 +457,18 @@ class CollectionManager:
     ) -> list[Paper]:
         return self._s2.discover(
             keywords=keywords, venues=venues,
+            since=since, max_results=max_results,
+        )
+
+    def _collect_openalex(
+        self,
+        keywords: list[str],
+        venues: list[str],
+        since: datetime,
+        max_results: int,
+    ) -> list[Paper]:
+        return self._openalex.discover(
+            keywords=keywords, venues=venues or None,
             since=since, max_results=max_results,
         )
 
