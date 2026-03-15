@@ -35,6 +35,14 @@ Call `paper_workspace_context()` first. Read the `mode` field:
 | "推荐和我课题相关的" / "recommend" | `paper_recommend` tool directly |
 | "抽取结构化信息" / "extract" / "比较表格" | `paper_extract` or `paper_compare_table` |
 | "看看保存的报告" / "有哪些综述" / "list reports" | `paper_list_reports` tool directly |
+| "我的偏好" / "我喜欢什么方向" / "preferences" | `paper_preferences` tool directly |
+| "最近有新论文吗" / "watchlist 有更新吗" | `paper_watch_check` tool directly |
+| "我关注了什么" / "watchlist" | `paper_watch_list` tool directly |
+| "这篇的表格" / "提取表格" / "tables" | `paper_tables` tool directly |
+| "哪些论文用了 GNN" / "query profiles" | `paper_query` tool directly |
+| "我的阅读进度" / "reading stats" | `paper_reading_stats` tool directly |
+| "看看我对这篇的笔记" / "show notes" | `paper_note_show` tool directly |
+| "工作区概览" / "workspace status" | `paper_workspace_status` tool directly |
 | Direct search keywords | `paper_search` or `paper_quick_scan` |
 
 ## Interaction Rules

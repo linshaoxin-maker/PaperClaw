@@ -33,6 +33,67 @@ class LLMProvider(ABC):
     def synthesize(self, prompt: str) -> str:
         ...
 
+    # ── v04-experience: Batch scoring ──
+
+    def score_relevance_batch(
+        self, papers: list[Paper], interests: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Score multiple papers in a single LLM call.
+
+        Returns a list of dicts with the same keys as score_relevance().
+        Length of returned list equals len(papers).
+        On parse failure, returns default low scores for all papers.
+        """
+        topics_str = ", ".join(interests.get("topics", []))
+        keywords_str = ", ".join(interests.get("keywords", []))
+
+        paper_blocks = []
+        for i, p in enumerate(papers, 1):
+            abstract_short = p.abstract[:400] if p.abstract else "(no abstract)"
+            paper_blocks.append(
+                f"Paper {i}:\n- Title: {p.title}\n- Abstract: {abstract_short}"
+            )
+
+        prompt = (
+            f"Evaluate each paper's relevance to the research interests below.\n\n"
+            f"Research interests:\n"
+            f"- Topics: {topics_str}\n"
+            f"- Keywords: {keywords_str}\n\n"
+            + "\n\n".join(paper_blocks)
+            + "\n\nReturn a JSON array with one object per paper, in order. "
+            f"Each object must have:\n"
+            f'- "score": float 0.0-10.0\n'
+            f'- "band": "high" if score >= 7.0, else "low"\n'
+            f'- "reason": brief explanation in Chinese (1-2 sentences)\n'
+            f'- "topics": list of topic tags\n\n'
+            f"Return ONLY the JSON array, no markdown."
+        )
+
+        raw = self.synthesize(prompt)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0]
+
+        try:
+            results = json.loads(raw)
+            if not isinstance(results, list) or len(results) != len(papers):
+                raise ValueError("batch result length mismatch")
+            out = []
+            for r in results:
+                score = float(r.get("score", 0))
+                out.append({
+                    "score": score,
+                    "band": "high" if score >= 7.0 else "low",
+                    "reason": r.get("reason", ""),
+                    "topics": r.get("topics", []),
+                })
+            return out
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return [
+                {"score": 0.0, "band": "low", "reason": "batch解析失败", "topics": []}
+                for _ in papers
+            ]
+
     # ── v04: Deep understanding methods ──
 
     def extract_structured(self, text: str, schema: dict[str, str]) -> dict[str, Any]:

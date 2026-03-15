@@ -40,6 +40,14 @@ Call `paper_workspace_context()` first. Read the `mode` field:
 | "给我组个 reading pack" / "怎么读" | `paper_reading_pack` tool directly |
 | "推荐和我课题相关的" / "recommend" | `paper_recommend` tool directly |
 | "抽取结构化信息" / "extract" / "比较表格" | `paper_extract` or `paper_compare_table` |
+| "我的偏好" / "我喜欢什么方向" / "preferences" | `paper_preferences` tool directly |
+| "最近有新论文吗" / "watchlist 有更新吗" | `paper_watch_check` tool directly |
+| "我关注了什么" / "watchlist" | `paper_watch_list` tool directly |
+| "这篇的表格" / "提取表格" / "tables" | `paper_tables` tool directly |
+| "哪些论文用了 GNN" / "query profiles" | `paper_query` tool directly |
+| "我的阅读进度" / "reading stats" | `paper_reading_stats` tool directly |
+| "看看我对这篇的笔记" / "show notes" | `paper_note_show` tool directly |
+| "工作区概览" / "workspace status" | `paper_workspace_status` tool directly |
 | Direct search keywords | `paper_search` or `paper_quick_scan` |
 
 ## Interaction Rules
@@ -116,10 +124,18 @@ description: Deep analysis of a single paper. Triggers on "分析这篇", "deep 
 1. **Resolve paper_id from context**: If the user refers to a paper by index (e.g. "第3篇", "分析上面那篇"), resolve it from the papers discussed earlier in this conversation. If user gives an explicit paper ID or arXiv ID, use that directly.
 2. Call `paper_show(paper_id)` to get full paper details
 3. Call `paper_profile()` to understand user's research context
-4. **Check for full text**: Try `paper_sections(paper_id)` — if parsed, the analysis will use full text. If not parsed but a PDF exists, call `paper_parse(paper_id)` to parse it first.
+4. **Check for full text**: Try `paper_sections(paper_id)` — if it returns sections, mark analysis_basis = "full_text". If not parsed but a PDF exists, call `paper_parse(paper_id)` to parse it first. If no PDF available, mark analysis_basis = "abstract".
 5. **Extract structured profile**: Call `paper_extract(paper_id)` to get task/method/dataset/baseline/metric data.
-6. **[FORK]** "全面分析，还是关注某个角度？（方法/实验/跟你的关联/可信度）"
-7. Generate analysis based on user's choice (or full analysis by default). If full text is available, use `paper_ask(paper_id, question)` for specific questions.
+6. **Show tables (if available)**: If analysis_basis == "full_text", call `paper_tables(paper_id)` to show extracted tables.
+7. **[FORK]** "全面分析，还是关注某个角度？（方法/实验/跟你的关联/可信度）"
+8. Generate analysis based on user's choice (or full analysis by default). If full text is available, use `paper_ask(paper_id, question)` for specific questions.
+
+## Source Annotation Rule
+
+**IMPORTANT**: Every analysis output MUST start with a source annotation:
+- If analysis_basis == "full_text": show **[基于全文]** at the top
+- If analysis_basis == "abstract": show **[基于摘要]** at the top
+This helps the user understand the depth and reliability of the analysis.
 
 ## Analysis Template (for AI generation)
 

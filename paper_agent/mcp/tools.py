@@ -1036,21 +1036,6 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                 meta = p.metadata or {}
                 pdf_url: str | None = None
 
-                if arxiv_id:
-                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-                elif meta.get("pdf_url"):
-                    pdf_url = meta["pdf_url"]
-                elif meta.get("doi"):
-                    pdf_url = f"https://doi.org/{meta['doi']}"
-
-                if not pdf_url:
-                    results.append({
-                        "id": p.id, "title": p.title,
-                        "status": "skipped",
-                        "reason": "No arXiv ID or open-access PDF URL available",
-                    })
-                    continue
-
                 file_id = arxiv_id or p.source_paper_id or p.id
                 file_id = re.sub(r"[/\\:]", "_", file_id)
                 safe_name = re.sub(r"[^\w\s-]", "", p.title)[:80].strip().replace(" ", "_")
@@ -1064,24 +1049,48 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                     })
                     continue
 
-                try:
-                    resp = client.get(pdf_url)
-                    if resp.status_code == 200 and len(resp.content) > 1000:
-                        filepath.write_bytes(resp.content)
-                        results.append({
-                            "id": p.id, "title": p.title,
-                            "status": "downloaded", "path": str(filepath),
-                        })
-                    else:
-                        results.append({
-                            "id": p.id, "title": p.title,
-                            "status": "failed",
-                            "reason": f"HTTP {resp.status_code}, size={len(resp.content)}",
-                        })
-                except Exception as exc:
+                candidate_urls: list[str] = []
+                if arxiv_id:
+                    candidate_urls.append(f"https://arxiv.org/pdf/{arxiv_id}.pdf")
+                if meta.get("pdf_url"):
+                    candidate_urls.append(meta["pdf_url"])
+                if meta.get("doi"):
+                    candidate_urls.append(f"https://doi.org/{meta['doi']}")
+
+                if not candidate_urls:
                     results.append({
                         "id": p.id, "title": p.title,
-                        "status": "failed", "reason": str(exc),
+                        "status": "skipped",
+                        "reason": "No arXiv ID, open-access PDF URL, or DOI available",
+                    })
+                    continue
+
+                downloaded = False
+                last_reason = ""
+                for url in candidate_urls:
+                    try:
+                        resp = client.get(url, timeout=30.0)
+                        content_type = resp.headers.get("content-type", "")
+                        if resp.status_code == 200 and len(resp.content) > 1000 and "pdf" in content_type.lower():
+                            filepath.write_bytes(resp.content)
+                            results.append({
+                                "id": p.id, "title": p.title,
+                                "status": "downloaded", "path": str(filepath),
+                            })
+                            downloaded = True
+                            break
+                        elif resp.status_code == 200 and "html" in content_type.lower():
+                            last_reason = "Publisher page (paywall), not a PDF"
+                        else:
+                            last_reason = f"HTTP {resp.status_code}, content-type={content_type}"
+                    except Exception as exc:
+                        last_reason = str(exc)
+
+                if not downloaded:
+                    results.append({
+                        "id": p.id, "title": p.title,
+                        "status": "skipped",
+                        "reason": last_reason or "All download URLs failed",
                     })
         finally:
             client.close()
@@ -1375,23 +1384,33 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                         authors = [a.get("name", "") for a in (hit.get("authors") or [])]
                         year = hit.get("year")
 
+                        oa = hit.get("openAccessPdf")
+                        oa_url = oa.get("url") if isinstance(oa, dict) else ""
+                        venue = hit.get("venue") or ""
+
                         paper_obj = Paper(
                             id="",
                             canonical_key=f"arxiv:{arxiv_id}" if arxiv_id else f"s2:{hit['paperId']}",
-                            source="semantic_scholar",
+                            source_name="semantic_scholar",
                             source_paper_id=arxiv_id or hit["paperId"],
                             title=hit_title,
                             authors=authors,
                             abstract=hit.get("abstract") or "",
                             url=hit.get("url") or "",
                             published_at=datetime(year, 1, 1) if year else None,
+                            metadata={
+                                "s2_id": hit["paperId"],
+                                "arxiv_id": arxiv_id,
+                                "doi": doi,
+                                "pdf_url": oa_url,
+                                "venue": venue,
+                            },
                         )
 
                         if arxiv_id:
                             pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-                        oa = hit.get("openAccessPdf")
-                        if oa and oa.get("url"):
-                            pdf_url = pdf_url or oa["url"]
+                        if oa_url:
+                            pdf_url = pdf_url or oa_url
 
                         result["matched_via"] = "semantic_scholar"
                         break

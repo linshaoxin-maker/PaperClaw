@@ -89,11 +89,24 @@ class DigestGenerator:
         return path
 
     def _format_paper(self, idx: int, paper: Paper) -> list[str]:
+        meta_parts = [f"**Score:** {paper.relevance_score:.1f}/10"]
+        if paper.source_name:
+            meta_parts.append(f"**Source:** {paper.source_name}")
+        if paper.published_at:
+            meta_parts.append(f"**Date:** {paper.published_at.strftime('%Y-%m-%d')}")
+        if paper.canonical_key:
+            meta_parts.append(f"**ID:** {paper.canonical_key}")
+
         lines = [
             f"### {idx}. {paper.title}",
-            f"**Score:** {paper.relevance_score:.1f}/10 | **Authors:** {', '.join(paper.authors[:3])}",
-            f"**Link:** {paper.url}",
+            " | ".join(meta_parts),
+            f"**Authors:** {', '.join(paper.authors[:3])}",
         ]
+        if paper.topics:
+            lines.append(f"**Topics:** {', '.join(paper.topics)}")
+        if paper.methodology_tags:
+            lines.append(f"**Methods:** {', '.join(paper.methodology_tags)}")
+        lines.append(f"**Link:** {paper.url}")
         if paper.recommendation_reason:
             lines.append(f"**Why:** {paper.recommendation_reason}")
         if paper.abstract:

@@ -40,6 +40,9 @@ class Paper:
             "url": self.url,
             "relevance_score": self.relevance_score,
             "topics": self.topics,
+            "reading_status": self.reading_status,
+            "canonical_key": self.canonical_key,
+            "source_paper_id": self.source_paper_id,
         }
 
     def to_compact_dict(self) -> dict[str, Any]:
@@ -55,13 +58,17 @@ class Paper:
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "url": self.url,
             "topics": self.topics,
+            "methodology_tags": self.methodology_tags,
             "score": self.relevance_score,
         }
 
     def to_detail_dict(self) -> dict[str, Any]:
+        meta = self.metadata or {}
         return {
             "object_type": "paper_detail",
             "id": self.id,
+            "canonical_key": self.canonical_key,
+            "source_paper_id": self.source_paper_id,
             "title": self.title,
             "authors": self.authors,
             "abstract": self.abstract,
@@ -77,4 +84,10 @@ class Paper:
             },
             "recommendation_reason": self.recommendation_reason,
             "lifecycle_state": self.lifecycle_state,
+            "reading_status": self.reading_status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "pdf_url": meta.get("pdf_url") or None,
+            "doi": meta.get("doi") or None,
+            "citation_count": meta.get("citation_count") or meta.get("citationCount"),
+            "venue": meta.get("venue") or None,
         }

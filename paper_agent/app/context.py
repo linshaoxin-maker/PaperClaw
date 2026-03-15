@@ -127,7 +127,10 @@ class AppContext:
 
     @cached_property
     def filtering_manager(self) -> FilteringManager:
-        return FilteringManager(self.storage, self.llm)
+        return FilteringManager(
+            self.storage, self.llm,
+            feedback_manager=self.feedback_manager,
+        )
 
     @cached_property
     def search_engine(self) -> SearchEngine:
