@@ -4,6 +4,8 @@ argument-hint: <topic>
 allowed-tools: [
   "mcp__paper-agent__paper_quick_scan",
   "mcp__paper-agent__paper_trend_data",
+  "mcp__paper-agent__paper_field_stats",
+  "mcp__paper-agent__paper_search",
   "mcp__paper-agent__paper_save_report",
   "Read"
 ]

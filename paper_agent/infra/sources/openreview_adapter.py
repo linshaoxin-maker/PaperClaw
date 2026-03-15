@@ -217,6 +217,15 @@ class OpenReviewAdapter(SourceAdapter):
         if not isinstance(keywords, list):
             keywords = []
 
+        # Extract review scores and decision if available
+        decision_field = content.get("decision", {})
+        decision = decision_field.get("value", "") if isinstance(decision_field, dict) else str(decision_field) if decision_field else ""
+        tldr_field = content.get("TL;DR", content.get("TLDR", {}))
+        tldr = tldr_field.get("value", "") if isinstance(tldr_field, dict) else str(tldr_field) if tldr_field else ""
+        pdf_field = content.get("pdf", {})
+        pdf_path = pdf_field.get("value", "") if isinstance(pdf_field, dict) else str(pdf_field) if pdf_field else ""
+        pdf_url = f"https://openreview.net/pdf?id={forum_id}" if forum_id else ""
+
         return Paper(
             canonical_key=canonical_key,
             source_name="openreview",
@@ -227,9 +236,15 @@ class OpenReviewAdapter(SourceAdapter):
             published_at=published_at,
             url=url,
             topics=[venue_short] + keywords[:5],
+            venue=venue_short,
+            pdf_url=pdf_url or None,
             metadata={
                 "venue_id": venue_id,
                 "forum_id": forum_id,
                 "year": year,
+                "decision": decision,
+                "tldr": tldr,
+                "keywords": keywords[:10],
+                "pdf_url": pdf_url,
             },
         )

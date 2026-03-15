@@ -265,6 +265,15 @@ class OpenAlexAdapter(SourceAdapter):
         if not url and loc_landing:
             url = loc_landing
 
+        # Extract author affiliations
+        affiliations = []
+        for authorship in work.get("authorships", []):
+            inst_list = authorship.get("institutions", [])
+            for inst in inst_list:
+                inst_name = inst.get("display_name", "")
+                if inst_name and inst_name not in affiliations:
+                    affiliations.append(inst_name)
+
         return Paper(
             canonical_key=canonical_key,
             source_name="openalex",
@@ -275,6 +284,10 @@ class OpenAlexAdapter(SourceAdapter):
             published_at=published_at,
             url=url,
             topics=topics,
+            doi=doi or None,
+            venue=source_display,
+            citation_count=citation_count if citation_count else None,
+            pdf_url=oa_url or None,
             metadata={
                 "openalex_id": openalex_id,
                 "doi": doi,
@@ -282,6 +295,7 @@ class OpenAlexAdapter(SourceAdapter):
                 "source_name": source_display,
                 "citation_count": citation_count,
                 "oa_url": oa_url,
+                "affiliations": affiliations[:10],
             },
         )
 

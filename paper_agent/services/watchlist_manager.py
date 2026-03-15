@@ -103,37 +103,81 @@ class WatchlistManager:
         }
 
     def _check_single(self, item: dict[str, Any]) -> list[Paper]:
-        """Check for new papers matching a single watchlist item."""
+        """Check for new papers matching a single watchlist item.
+
+        Uses last_checked to only return papers added since last check.
+        Uses SQL queries instead of loading all papers into memory.
+        """
         watch_type = item["watch_type"]
         watch_value = item["watch_value"]
         last_checked = item.get("last_checked")
 
         if watch_type == "topic":
-            return self._storage.search_papers(watch_value, limit=20)
+            papers = self._storage.search_papers(watch_value, limit=50)
+            if last_checked:
+                from datetime import datetime
+                lc = datetime.fromisoformat(last_checked)
+                papers = [p for p in papers if p.created_at and p.created_at > lc]
+            return papers
 
         elif watch_type == "author":
-            all_papers = self._storage.get_all_papers(limit=5000)
-            return [
-                p for p in all_papers
-                if any(watch_value.lower() in a.lower() for a in p.authors)
-            ]
+            # Use SQL LIKE query on authors_json instead of loading all papers
+            try:
+                rows = self._storage.conn.execute(
+                    "SELECT * FROM papers WHERE authors_json LIKE ? ORDER BY created_at DESC LIMIT 50",
+                    (f"%{watch_value}%",),
+                ).fetchall()
+                papers = [self._storage._row_to_paper(r) for r in rows]
+                if last_checked:
+                    from datetime import datetime
+                    lc = datetime.fromisoformat(last_checked)
+                    papers = [p for p in papers if p.created_at and p.created_at > lc]
+                return papers
+            except Exception:
+                return []
 
         elif watch_type == "venue":
-            all_papers = self._storage.get_all_papers(limit=5000)
-            return [
-                p for p in all_papers
-                if watch_value.lower() in (p.metadata.get("venue", "") or "").lower()
-                or watch_value.lower() in p.source_name.lower()
-            ]
+            # Use the new first-class venue column
+            try:
+                rows = self._storage.conn.execute(
+                    "SELECT * FROM papers WHERE venue LIKE ? OR source_name LIKE ? ORDER BY created_at DESC LIMIT 50",
+                    (f"%{watch_value}%", f"%{watch_value}%"),
+                ).fetchall()
+                papers = [self._storage._row_to_paper(r) for r in rows]
+                if last_checked:
+                    from datetime import datetime
+                    lc = datetime.fromisoformat(last_checked)
+                    papers = [p for p in papers if p.created_at and p.created_at > lc]
+                return papers
+            except Exception:
+                return []
 
         elif watch_type == "method_line":
-            return self._storage.search_papers(watch_value, limit=20)
+            papers = self._storage.search_papers(watch_value, limit=50)
+            if last_checked:
+                from datetime import datetime
+                lc = datetime.fromisoformat(last_checked)
+                papers = [p for p in papers if p.created_at and p.created_at > lc]
+            return papers
 
         elif watch_type == "forward_citations":
             from paper_agent.services.citation_service import CitationService
             cit_service = CitationService(self._storage)
             result = cit_service.get_citations(watch_value, direction="citations", limit=20)
-            paper_ids = [c.get("id", "") for c in result.get("citations", []) if c.get("id")]
-            return [p for pid in paper_ids if (p := self._storage.get_paper(pid))]
+            citations = result.get("citations", [])
+            papers = []
+            for c in citations:
+                # Citations are dicts with paperId/title — try to find in local DB
+                paper_id = c.get("paperId") or c.get("id") or ""
+                title = c.get("title", "")
+                if paper_id:
+                    p = self._storage.get_paper(paper_id)
+                    if p:
+                        papers.append(p)
+                elif title:
+                    found = self._storage.search_papers(title, limit=1)
+                    if found:
+                        papers.append(found[0])
+            return papers
 
         return []

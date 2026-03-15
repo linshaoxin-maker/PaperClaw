@@ -6,7 +6,8 @@ allowed-tools: [
   "mcp__paper-agent__paper_templates_list",
   "mcp__paper-agent__paper_sources_list",
   "mcp__paper-agent__paper_sources_enable",
-  "mcp__paper-agent__paper_collect"
+  "mcp__paper-agent__paper_collect",
+  "mcp__paper-agent__paper_health"
 ]
 ---
 

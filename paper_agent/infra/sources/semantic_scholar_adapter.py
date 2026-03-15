@@ -301,6 +301,11 @@ class SemanticScholarAdapter(SourceAdapter):
         pdf_info = hit.get("openAccessPdf") or {}
         pdf_url = pdf_info.get("url", "") if isinstance(pdf_info, dict) else ""
 
+        tldr = hit.get("tldr")
+        tldr_text = tldr.get("text", "") if isinstance(tldr, dict) else ""
+        influential_count = hit.get("influentialCitationCount", 0)
+        fields_of_study = hit.get("fieldsOfStudy") or []
+
         return Paper(
             canonical_key=canonical_key,
             source_name="semantic_scholar",
@@ -311,6 +316,10 @@ class SemanticScholarAdapter(SourceAdapter):
             published_at=published_at,
             url=url,
             topics=topics,
+            doi=doi or None,
+            venue=venue,
+            citation_count=citation_count if citation_count else None,
+            pdf_url=pdf_url or None,
             metadata={
                 "s2_id": s2_id,
                 "arxiv_id": arxiv_id,
@@ -320,5 +329,8 @@ class SemanticScholarAdapter(SourceAdapter):
                 "citation_count": citation_count,
                 "publication_types": pub_types,
                 "pdf_url": pdf_url,
+                "tldr": tldr_text,
+                "influential_citation_count": influential_count,
+                "fields_of_study": fields_of_study,
             },
         )

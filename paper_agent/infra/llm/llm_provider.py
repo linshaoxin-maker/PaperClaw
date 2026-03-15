@@ -11,6 +11,12 @@ from paper_agent.domain.models.paper import Paper
 
 
 class LLMProvider(ABC):
+    _storage: Any = None  # Set by AppContext for cache support
+
+    def set_storage(self, storage: Any) -> None:
+        """Inject storage for LLM response caching."""
+        self._storage = storage
+
     @abstractmethod
     def score_relevance(
         self, paper: Paper, interests: dict[str, Any]
@@ -33,6 +39,39 @@ class LLMProvider(ABC):
     def synthesize(self, prompt: str) -> str:
         ...
 
+    def _cache_key(self, task_type: str, input_data: str) -> str:
+        """Generate a deterministic cache key."""
+        h = hashlib.sha256(input_data.encode()).hexdigest()[:16]
+        return f"{task_type}:{h}"
+
+    def _get_cached(self, task_type: str, input_data: str) -> str | None:
+        """Try to get a cached LLM response."""
+        if not self._storage:
+            return None
+        try:
+            key = self._cache_key(task_type, input_data)
+            return self._storage.get_llm_cache(key)
+        except Exception:
+            return None
+
+    def _set_cached(self, task_type: str, input_data: str, response: str) -> None:
+        """Cache an LLM response."""
+        if not self._storage:
+            return
+        try:
+            key = self._cache_key(task_type, input_data)
+            h = hashlib.sha256(input_data.encode()).hexdigest()[:16]
+            self._storage.set_llm_cache(
+                cache_key=key,
+                provider=self.__class__.__name__,
+                model="",
+                task_type=task_type,
+                input_hash=h,
+                response_json=response,
+            )
+        except Exception:
+            pass
+
     # ── v04-experience: Batch scoring ──
 
     def score_relevance_batch(
@@ -43,9 +82,20 @@ class LLMProvider(ABC):
         Returns a list of dicts with the same keys as score_relevance().
         Length of returned list equals len(papers).
         On parse failure, returns default low scores for all papers.
+        Uses LLM cache when available.
         """
+        # Check cache for each paper individually
         topics_str = ", ".join(interests.get("topics", []))
         keywords_str = ", ".join(interests.get("keywords", []))
+        cache_input = json.dumps([p.canonical_key or p.id for p in papers]) + topics_str + keywords_str
+        cached = self._get_cached("batch_score", cache_input)
+        if cached:
+            try:
+                results = json.loads(cached)
+                if isinstance(results, list) and len(results) == len(papers):
+                    return results
+            except (json.JSONDecodeError, TypeError):
+                pass
 
         paper_blocks = []
         for i, p in enumerate(papers, 1):
@@ -87,6 +137,7 @@ class LLMProvider(ABC):
                     "reason": r.get("reason", ""),
                     "topics": r.get("topics", []),
                 })
+            self._set_cached("batch_score", cache_input, json.dumps(out))
             return out
         except (json.JSONDecodeError, ValueError, TypeError):
             return [

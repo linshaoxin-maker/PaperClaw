@@ -27,12 +27,14 @@ class FilteringManager:
         storage: SQLiteStorage,
         llm: LLMProvider,
         feedback_manager: Any | None = None,
+        credibility_assessor: Any | None = None,
         batch_size: int = _DEFAULT_BATCH_SIZE,
         pre_filter_enabled: bool = True,
     ) -> None:
         self._storage = storage
         self._llm = llm
         self._feedback_manager = feedback_manager
+        self._credibility = credibility_assessor
         self._batch_size = max(1, min(batch_size, 10))
         self._pre_filter_enabled = pre_filter_enabled
 
@@ -54,6 +56,7 @@ class FilteringManager:
             self._score_papers(needs_llm, interests, show_progress)
 
         self._apply_feedback_offset(papers)
+        self._enrich_credibility_signals(papers)
 
         failed = sum(1 for p in papers if p.recommendation_reason == "LLM 评分失败")
         if failed:
@@ -199,6 +202,19 @@ class FilteringManager:
             clamped_offset = max(-2.0, min(2.0, avg_offset))
             paper.relevance_score = max(0.0, min(10.0, paper.relevance_score + clamped_offset))
             paper.relevance_band = "high" if paper.relevance_score >= 7.0 else "low"
+
+    def _enrich_credibility_signals(self, papers: list[Paper]) -> None:
+        """Attach lightweight credibility signals to each paper's metadata."""
+        if not self._credibility:
+            return
+        try:
+            for paper in papers:
+                signals = self._credibility.quick_signals(paper)
+                if not paper.metadata:
+                    paper.metadata = {}
+                paper.metadata["credibility_signals"] = signals
+        except Exception:
+            logger.warning("Credibility enrichment failed, skipping")
 
     def _apply_and_persist(self, paper: Paper, result: dict[str, Any]) -> None:
         """Apply LLM result to paper object and persist to DB (main thread only)."""

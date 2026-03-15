@@ -73,10 +73,12 @@ class AppContext:
         cfg = self.config
         if cfg.llm_provider == "openai":
             from paper_agent.infra.llm.openai_provider import OpenAIProvider
-            return OpenAIProvider(api_key=cfg.llm_api_key, model=cfg.llm_model, base_url=cfg.llm_base_url)
+            provider = OpenAIProvider(api_key=cfg.llm_api_key, model=cfg.llm_model, base_url=cfg.llm_base_url)
         else:
             from paper_agent.infra.llm.anthropic_provider import AnthropicProvider
-            return AnthropicProvider(api_key=cfg.llm_api_key, model=cfg.llm_model, base_url=cfg.llm_base_url)
+            provider = AnthropicProvider(api_key=cfg.llm_api_key, model=cfg.llm_model, base_url=cfg.llm_base_url)
+        provider.set_storage(self.storage)
+        return provider
 
     @cached_property
     def source_collector(self) -> SourceCollector:
@@ -130,6 +132,7 @@ class AppContext:
         return FilteringManager(
             self.storage, self.llm,
             feedback_manager=self.feedback_manager,
+            credibility_assessor=self.credibility_assessor,
         )
 
     @cached_property
@@ -139,11 +142,11 @@ class AppContext:
             profile = self.config
         except Exception:
             pass
-        return SearchEngine(self.storage, profile=profile)
+        return SearchEngine(self.storage, profile=profile, feedback_manager=self.feedback_manager)
 
     @cached_property
     def digest_generator(self) -> DigestGenerator:
-        return DigestGenerator(self.storage)
+        return DigestGenerator(self.storage, feedback_manager=self.feedback_manager)
 
     @cached_property
     def workspace_manager(self) -> WorkspaceManager:
