@@ -43,15 +43,28 @@ If `first_use` is false, just briefly say: "已记录到工作区。"
 
 **Auto-save**: call `paper_save_report(report_type="analysis", content=<analysis markdown>, filename="{paper_id}.md")` to persist the analysis as a file.
 
-**[FORK]** Present options based on mode:
-- workspace: "已自动记录到工作区，分析笔记已保存至 {path}。要看引用链？还是先这样？"
-- lightweight: "分析笔记已保存至 {path}。要看引用链？还是先这样？"
+**[CONTEXT-AWARE FORK]** — Based on the analysis result, suggest next steps:
 
-## If user wants citation trace
+Analyze the paper's characteristics and suggest accordingly:
 
-Route to `paper_citation_trace(paper_id)`.
+- If paper has high citation count (>50) or is a seminal work:
+  "分析笔记已保存至 {path}。\n💡 **下一步建议**：\n1. 追踪引用链 — 看看谁在跟进这个方向\n2. 找类似方法的论文做对比\n（说编号或告诉我你想做什么）"
+
+- If paper has code available:
+  "分析笔记已保存至 {path}。\n💡 **下一步建议**：\n1. 做实验计划 — 这篇有代码，可以复现/改进\n2. 追踪引用链看后续工作\n（说编号或告诉我你想做什么）"
+
+- If paper's method is novel (novelty_claim is strong):
+  "分析笔记已保存至 {path}。\n💡 **下一步建议**：\n1. 看看这个方法能不能用到你的课题 — 生成 research ideas\n2. 找同方向的论文做对比\n（说编号或告诉我你想做什么）"
+
+- Default:
+  "分析笔记已保存至 {path}。\n💡 **下一步建议**：\n1. 追踪引用链\n2. 找 [{paper_method_family}] 方向的更多论文\n（说编号或告诉我你想做什么）"
+
+## If user picks citation trace
+
+Route to `paper_citation_trace(paper_id)`. Carry the paper's method_family and topics as context for the citation exploration.
 
 ## Rules
 
 - 2 checkpoints (analysis angle + after analysis). Both workspace note-add and file save are automatic.
 - If user explicitly says "不要记录", skip the note_add call and the save_report call.
+- FORK suggestions must be based on the actual analysis result (citation count, code availability, method novelty). Never give the same generic options.

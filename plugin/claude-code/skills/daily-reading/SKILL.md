@@ -20,11 +20,21 @@ description: Morning paper reading workflow. Triggers on "start my day", "今天
    **结论与建议**: 今日最值得关注的方向和论文，建议阅读顺序
 
 4. **Auto-save**: call `paper_save_report(report_type="daily_digest", content=<digest markdown>, filename="{YYYY-MM-DD}.md")` using the daily-digest-template. Tell user the saved path.
-5. **[FORK]** "今日摘要已保存至 {path}。深入看哪篇？还是先这样？"
+
+5. **[CONTEXT-AWARE FORK]** — Based on the digest result, suggest next steps:
+
+   - If digest has ≥1 high-confidence paper:
+     "今日摘要已保存至 {path}。\n💡 **下一步建议**：\n1. 深入分析 [{top_paper_title}]（{score}分，{reason}）\n2. 先筛选一轮，确认哪些值得读\n（说编号或告诉我你想做什么）"
+
+   - If digest is empty:
+     "今天没有新的高相关论文。\n💡 **下一步建议**：\n1. 扫描一下 [{user_primary_topic}] 的最新进展\n2. 看看 watchlist 有没有更新\n（说编号或告诉我你想做什么）"
+
+   - If watchlist has updates:
+     Append: "另外，[{watch_item}] 有 {N} 篇新论文，要看看吗？"
 
 ## If user picks a paper
 
-Hand off to the **deep-dive** skill with the selected paper ID.
+Hand off to the **deep-dive** skill with the selected paper ID. Carry the paper's score, topics, and recommendation_reason as context.
 
 ## Workspace behavior
 
@@ -38,4 +48,4 @@ The `paper_morning_brief` response includes a `mode` field:
 
 - Only 1 checkpoint (the fork above). Everything else is automatic.
 - Don't ask about collection parameters, source selection, or date ranges unless user specifies.
-- If digest is empty (no new papers), say so and suggest `paper_quick_scan` for a topic.
+- FORK suggestions must reference actual paper titles and scores from the digest result. Never give generic options.

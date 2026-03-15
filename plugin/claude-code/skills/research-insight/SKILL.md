@@ -19,7 +19,17 @@ description: Research trend analysis and insight generation. Triggers on "趋势
    **主要会议分布**: | 会议 | 论文数 | 代表工作 |
    **结论与建议**: 方向整体判断（上升/成熟/衰退）、最有潜力的子方向、入场时机建议
 4. **Auto-save**: call `paper_save_report(report_type="insight", content=<insight markdown>, filename="{topic}-{YYYY-MM-DD}.md")` to persist the insight report.
-5. **[FORK]** "趋势洞察已保存至 {path}。要深入某个子方向？还是先这样？"
+
+5. **[CONTEXT-AWARE FORK]** — Based on the trend analysis result, suggest next steps:
+
+   - If found a rising sub-direction:
+     "趋势洞察已保存至 {path}。\n💡 **下一步建议**：\n1. 深入 [{rising_subdirection}] — 这个子方向在快速上升\n2. 做一个 [{rising_subdirection}] 的文献综述\n（说编号或告诉我你想做什么）"
+
+   - If found a dominant/mature direction:
+     "趋势洞察已保存至 {path}。\n💡 **下一步建议**：\n1. 分析 [{top_paper_title}] — 这个方向的代表工作\n2. 找研究空白 — 看看还有什么没被做过\n（说编号或告诉我你想做什么）"
+
+   - If the direction is declining:
+     "趋势洞察已保存至 {path}。这个方向发文量在下降。\n💡 **下一步建议**：\n1. 看看相邻方向 [{related_topic}] 的趋势\n2. 分析为什么在下降 — 是被新方法替代了吗？\n（说编号或告诉我你想做什么）"
 
 ## If user wants to go deeper
 
@@ -42,3 +52,4 @@ Only when user explicitly asks for "详细分析" / "deep analysis":
 - Don't ask about time range or sub-topics upfront — use defaults.
 - Present trend data as a compact table with arrows (trend: up/down/stable).
 - Always auto-save insight report via `paper_save_report`. Additional actions are opt-in via FORK.
+- FORK suggestions must reference actual sub-directions, paper titles, and trend signals from the analysis result.
