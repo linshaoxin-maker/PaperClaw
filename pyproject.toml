@@ -20,6 +20,7 @@ openai = ">=1.0"
 anthropic = ">=0.30"
 prompt-toolkit = ">=3.0"
 mcp = {version = ">=1.0", extras = ["cli"]}
+pymupdf = ">=1.24"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0"

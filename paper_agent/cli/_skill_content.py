@@ -1,809 +1,408 @@
-"""Skill and template string constants for IDE setup distribution.
+"""Skill content constants for IDE integration distribution.
 
-Source of truth lives in plugin/claude-code/skills/ — these are the
-"distribution copies" embedded as Python strings so they can be written
-by `paper-agent setup cursor/claude-code` even when installed via pip.
+These string constants mirror plugin/claude-code/skills/*.
+``paper-agent setup`` writes them into Cursor's skill directories
+so they're available without the plugin directory being present.
 """
-
-from __future__ import annotations
-
-# ── Router Skill ─────────────────────────────────────────────────
 
 ROUTER_SKILL = """\
 ---
-name: paper-agent
-description: >-
-  AI research paper intelligence — route user intent to the right workflow.
-  Use when the user mentions paper, arxiv, digest, research, 论文, 论文分析,
-  start my day, paper-analyze, paper-compare, paper-survey, arXiv IDs
-  (like 2301.12345), ML method names, or asks about academic research trends.
-version: 0.3.0
+name: paper-intelligence
+description: AI research paper intelligence — router skill that detects user intent and delegates to the appropriate workflow. Triggers on paper, arxiv, digest, research, 论文, arXiv IDs, ML method names, or academic research questions.
 ---
 
-# Paper Agent — Intent Router
+# Paper Intelligence Router
 
-Route user intent to the correct workflow skill, or handle simple
-single-tool requests directly.
+Detect user intent and delegate to the right workflow skill or direct MCP tool call.
+
+## Persona Detection
+
+Call `paper_workspace_context()` first. Read the `mode` field:
+- `"workspace"` → user has reading history; show progress, suggest groups, auto-mark
+- `"lightweight"` → just present results, skip workspace features
 
 ## Intent Routing
 
-| User says | Route to | Notes |
-|-----------|----------|-------|
-| "start my day", "每日开工", "今天有什么新论文" | **paper-agent-daily-reading** | Daily startup flow |
-| "分析这篇", "展开讲讲", arXiv ID | **paper-agent-deep-dive** | Single-paper deep analysis |
-| "综述", "survey", "这个方向有哪些工作" | **paper-agent-survey** | Literature survey |
-| "引用链", "谁引用了它", "citations" | **paper-agent-citation** | Citation chain exploration |
-| "帮我筛一下", "哪些值得读", "triage" | **paper-agent-triage** | Batch screening |
-| "趋势", "洞察", "什么方法在兴起" | **paper-agent-insight** | Trend analysis |
+| User says | Route to |
+|---|---|
+| "start my day" / "今天看什么" / "morning" | `paper_morning_brief` tool directly |
+| Gives a paper title / arXiv ID | `paper_show` or `paper_find_and_download` |
+| "这篇论文讲了什么" / "analyze this" | deep-dive skill |
+| "这个方向有什么工作" / "survey" / "综述" | literature-survey skill |
+| "引用链" / "谁引了这篇" / "citation" | `paper_citation_trace` tool directly |
+| "筛一下" / "triage" / "哪些值得看" | `paper_auto_triage` tool directly |
+| "趋势" / "trend" / "这个方向火不火" | research-insight skill |
+| Research question (e.g. "RL做placement还有没有新意？") | `paper_research` tool directly |
+| "这篇可信吗" / "能不能复现" / "credibility" | `paper_credibility` tool directly |
+| "跟踪这个方向" / "watch" / "关注这个作者" | `paper_watch` tool directly |
+| "我觉得这篇不行" / "这类少推" / feedback | `paper_feedback` tool directly |
+| "这篇能给我什么启发" / "research ideas" | research-planning skill |
+| "给我组个 reading pack" / "怎么读" | `paper_reading_pack` tool directly |
+| "推荐和我课题相关的" / "recommend" | `paper_recommend` tool directly |
+| "抽取结构化信息" / "extract" / "比较表格" | `paper_extract` or `paper_compare_table` |
+| Direct search keywords | `paper_search` or `paper_quick_scan` |
 
-## Quick MCP Calls (no skill flow needed)
+## Interaction Rules
 
-| Scenario | Tool |
-|----------|------|
-| Search keyword | `paper_search` |
-| Show paper details | `paper_show` |
-| Reading progress | `paper_reading_stats` |
-| Group list | `paper_group_list` |
-| Download PDF | `paper_download` |
-| Find by title | `paper_find_and_download` |
-| Export BibTeX | `paper_export` |
-| Workspace dashboard | `paper_workspace_status` |
-
-## Output Rules
-
-1. **Chinese first**: All analysis and summaries in Chinese
-2. **Wikilink format**: Paper titles as `[[论文标题]]`
-3. **Concise by default**: Brief results for search, full detail only for deep analysis
-4. **Always ask before acting**: Each skill's checkpoints MUST ask the user
-5. **Deliverable at the end**: Each skill ends by offering to save a deliverable
-6. **Suggest next skill**: Each skill ends by suggesting possible next steps
+- **Context carry-over**: When the user's request relates to papers already in this conversation:
+  - **Explicit reference** ("根据已有的", "用刚才的", "基于这些"): Use those papers directly. No confirmation, no re-search.
+  - **Ambiguous** (same-topic request, but no explicit reference): ASK "刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+  - **New topic**: Treat as new search, ignore context.
+  - **No context**: Search directly.
+- **Intent-driven**: When the user's intent is clear, skip intermediate steps and go straight to results. Don't ask clarifying questions unless intent is genuinely ambiguous.
+- When routing to a tool directly (morning_brief, auto_triage, citation_trace), call it and present results. No extra questions.
+- When routing to a skill, follow that skill's fork-only checkpoints.
+- Never list more than 3 options. Prefer smart default + "或者？"
+- Workspace operations (note_add, reading_status, group_add) are automatic. File export is opt-in via each workflow's FORK.
 """
-
-# ── Workflow Skills ──────────────────────────────────────────────
 
 DAILY_READING_SKILL = """\
 ---
-name: paper-agent-daily-reading
-description: >-
-  Daily research startup workflow — context recovery, paper collection,
-  digest, and triage. Use when user says "start my day", "每日开工",
-  "今天有什么新论文", "开始工作", or any morning research routine trigger.
-version: 0.2.0
+name: daily-reading
+description: Morning paper reading workflow. Triggers on "start my day", "今天看什么", "morning digest", "每日推荐".
 ---
 
-# Daily Reading — 每日开工
+# Daily Reading
 
-每天早上的完整研究启动流程：恢复上下文 → 采集新论文 → 推荐 → 标记状态。
+## Flow
 
-## 交互流程
+1. Call `paper_morning_brief(days=1)` — this single tool does context recovery + collect + digest + auto-mark in one call
+2. Call `paper_watch_digest()` — check for watchlist updates
+3. Present as structured tables:
 
-### Phase 1: 上下文恢复
+   **今日推荐** (N 篇):
+   | # | 标题 | 评分 | 关键词 | 一句话总结 |
 
-**工具**: `paper_workspace_context()`
+   **Watchlist 更新** (if any):
+   | 跟踪项 | 类型 | 新论文数 | 最相关论文 |
 
-呈现昨日研究活动摘要后，**必须询问用户**：
+   **结论与建议**: 今日最值得关注的方向和论文，建议阅读顺序
 
-> 🗣️ 你昨天的进展如上。要：
-> a) 先看昨天未完成的待读论文
-> b) 直接收集今天的新论文
-> c) 两个都要（推荐）
+4. **[FORK]** "深入看哪篇？保存今日摘要？还是先这样？"
 
-### Phase 2: 采集新论文
+## If user picks a paper
 
-**工具**: `paper_collect(days=1)`
+Hand off to the **deep-dive** skill with the selected paper ID.
 
-呈现采集结果（来源分布、新增/重复数量），然后自动进入推荐。
+## If user wants to save
 
-### Phase 3: 每日推荐
+Write the digest to `daily/{YYYY-MM-DD}.md` using the daily-digest-template.
 
-**工具**: `paper_digest()`
+## Workspace behavior
 
-呈现推荐列表后，**必须询问用户**：
+The `paper_morning_brief` response includes a `mode` field:
+- `"workspace"`: top picks were auto-marked as `to_read`.
+  - If `auto_marked` > 0 AND this is the user's first time seeing auto-marking (no prior reading stats), explain: "（首次自动标记）我把 N 篇高相关论文自动标记为'待读'，方便你追踪阅读进度。这个行为可以通过切换到 lightweight 模式关闭。"
+  - On subsequent uses, just briefly mention: "已自动标记 N 篇为待读。"
+- `"lightweight"`: just present the digest, no status talk.
 
-> 🗣️ 这 {n} 篇推荐中，要标记哪些为待读？（给我编号，或"全部"）
-> 有特别重要的吗？我可以直接标记为"重要"。
+## Rules
 
-**工具**: `paper_reading_status(选中的 IDs, status)`
-
-### Phase 4: 深入（可选）
-
-**必须询问用户**：
-
-> 🗣️ 要深入看哪篇？还是先干活了？
-> - 给我编号 → 我切换到 **deep-dive** 模式
-> - "先干活" → 结束，祝你今天高效！
-
-### Phase 5: 交付件
-
-**必须询问用户**：
-
-> 🗣️ 要保存今天的阅读摘要吗？
-> 默认保存到：`daily/{YYYY-MM-DD}.md`
-
-**工具**: 使用 daily-digest-template 生成文件
-
-## 涉及的 MCP 工具
-
-| 工具 | 阶段 | 用途 |
-|------|------|------|
-| `paper_workspace_context` | Phase 1 | 恢复上下文 |
-| `paper_collect` | Phase 2 | 采集新论文 |
-| `paper_digest` | Phase 3 | 生成推荐 |
-| `paper_reading_status` | Phase 3 | 批量标记状态 |
-| `paper_reading_stats` | Phase 3 | 展示阅读进度 |
-
-## 可跳转的 Skill
-
-- Phase 4 选择深入 → **paper-agent-deep-dive**
-- 想做筛选分流 → **paper-agent-triage**
+- Only 1 checkpoint (the fork above). Everything else is automatic.
+- Don't ask about collection parameters, source selection, or date ranges unless user specifies.
+- If digest is empty (no new papers), say so and suggest `paper_quick_scan` for a topic.
 """
 
 DEEP_DIVE_SKILL = """\
 ---
-name: paper-agent-deep-dive
-description: >-
-  Deep analysis of a single paper — structured analysis, notes, citations,
-  status management. Use when user says "分析这篇论文", "paper-analyze",
-  "深度分析", "展开讲讲", "这篇论文怎么样", or references a specific paper
-  ID for analysis.
-version: 0.2.0
+name: deep-dive
+description: Deep analysis of a single paper. Triggers on "分析这篇", "deep dive", "这篇论文讲了什么", paper ID or arXiv ID input.
 ---
 
-# Deep Dive — 论文深度分析
+# Deep Dive Analysis
 
-对单篇论文进行结构化深度分析，保存笔记，管理阅读状态。
+## Flow
 
-## 交互流程
+1. **Resolve paper_id from context**: If the user refers to a paper by index (e.g. "第3篇", "分析上面那篇"), resolve it from the papers discussed earlier in this conversation. If user gives an explicit paper ID or arXiv ID, use that directly.
+2. Call `paper_show(paper_id)` to get full paper details
+3. Call `paper_profile()` to understand user's research context
+4. **Check for full text**: Try `paper_sections(paper_id)` — if parsed, the analysis will use full text. If not parsed but a PDF exists, call `paper_parse(paper_id)` to parse it first.
+5. **Extract structured profile**: Call `paper_extract(paper_id)` to get task/method/dataset/baseline/metric data.
+6. **[FORK]** "全面分析，还是关注某个角度？（方法/实验/跟你的关联/可信度）"
+7. Generate analysis based on user's choice (or full analysis by default). If full text is available, use `paper_ask(paper_id, question)` for specific questions.
 
-### Phase 1: 确认论文
+## Analysis Template (for AI generation)
 
-**工具**: `paper_show(paper_id)`
+When generating the analysis, use tables for structured data:
 
-呈现论文基本信息后，**必须询问用户**：
+- **核心信息表**: | 字段 | 值 | (title, authors, venue, year, citations)
+- **方法**: key techniques, architecture, loss function. If full text available, drill into method section.
+- **实验结果**: use table | 指标 | 本文 | Baseline1 | Baseline2 | — pull from extracted profile when available
+- **优劣势对比**: use table | 维度 | 本文 | 相关工作1 | 相关工作2 |
+- **可信度评估**: call `paper_credibility(paper_id)` — show venue tier, code availability, reproducibility risk
+- **结论与建议**: 研究价值判断 + 与用户研究方向的关联 + 是否值得深入跟进 + 关键参考文献
 
-> 🗣️ 要从哪些角度分析这篇论文？
-> a) 方法创新点 — 核心思想、与前人区别
-> b) 实验设计 — benchmark、baseline、指标
-> c) 与我研究的关联 — 对我当前工作的启发
-> d) 局限与改进空间 — 弱点和可能的改进方向
-> e) 全部（推荐首次阅读）
+## After analysis
 
-### Phase 2: 生成分析
+Auto-track: call `paper_note_add` to save note to workspace (this is internal tracking, not file export).
 
-根据用户选择的角度，使用 analysis-template 生成结构化分析。
+If `first_use` is true in the response, tell the user: "（首次自动记录）我把分析笔记保存到了工作区（.paper-agent/），方便以后查阅。如果不需要自动记录，告诉我'不要记录'就行。"
+If `first_use` is false, just briefly say: "已记录到工作区。"
 
-**关键**：必须结合用户的 `paper_profile` 研究方向，在"与我研究的关联"部分给出个性化建议。
+**[FORK]** Present options based on mode:
+- workspace: "已自动记录到工作区。要导出分析笔记为文件？看引用链？还是先这样？"
+- lightweight: "要导出分析笔记为文件？看引用链？还是先这样？"
 
-### Phase 3: 保存与标记
+## If user wants to export
 
-**必须询问用户**：
+Write analysis to `.paper-agent/notes/{paper_id}.md` or user-specified path.
 
-> 🗣️ 分析完成。接下来：
-> 1. 保存笔记吗？（默认保存到 `.paper-agent/notes/{paper_id}.md`）
-> 2. 标记为什么状态？
->    - `reading` — 正在读，还没读完
->    - `read` — 读完了
->    - `important` — 重要论文，需要反复参考
+## If user wants citation trace
 
-**工具**: `paper_note_add(paper_id, content, "ai_analysis")`
-**工具**: `paper_reading_status([paper_id], status)`
+Route to `paper_citation_trace(paper_id)`.
 
-### Phase 4: 延伸（可选）
+## Rules
 
-**必须询问用户**：
-
-> 🗣️ 要继续做什么？
-> a) 查引用链 — 这篇引用了谁、谁引用了它
-> b) 找相似论文 — 搜索方法/主题相似的论文
-> c) 加入分组 — 加到某个论文分组里
-> d) 对比 — 跟其他论文做对比
-> e) 结束
-
-根据用户选择：
-- a → 跳转 **paper-agent-citation** skill
-- b → `paper_search(相关关键词, diverse=True)`
-- c → `paper_group_add(name, [paper_id])`
-- d → 让用户给其他论文 ID，调用 `paper_compare`
-
-### Phase 5: 交付件
-
-交付件为笔记文件，在 Phase 3 已保存。文件路径：`.paper-agent/notes/{paper_id}.md`
-
-## 涉及的 MCP 工具
-
-| 工具 | 阶段 | 用途 |
-|------|------|------|
-| `paper_show` | Phase 1 | 获取论文详情 |
-| `paper_profile` | Phase 2 | 获取用户研究方向 |
-| `paper_note_add` | Phase 3 | 保存分析笔记 |
-| `paper_reading_status` | Phase 3 | 标记阅读状态 |
-| `paper_citations` | Phase 4 | 查引用链 |
-| `paper_search` | Phase 4 | 找相似论文 |
-| `paper_group_add` | Phase 4 | 加入分组 |
-| `paper_compare` | Phase 4 | 对比论文 |
-
-## 可跳转的 Skill
-
-- Phase 4a → **paper-agent-citation**
-- Phase 4d → **paper-agent-survey**（如果要对比的论文多于 3 篇）
+- 2 checkpoints (analysis angle + after analysis). Workspace note-add is automatic, file export is opt-in.
+- If user explicitly says "不要记录", skip the note_add call.
 """
 
 LITERATURE_SURVEY_SKILL = """\
 ---
-name: paper-agent-survey
-description: >-
-  Generate a structured literature survey — from keyword refinement to final
-  report with BibTeX. Use when user says "综述", "survey", "文献调研",
-  "帮我写个综述", "这个方向有哪些工作", or wants to systematically review
-  a research area.
-version: 0.2.0
+name: literature-survey
+description: Literature survey and review workflow. Triggers on "survey", "综述", "这个方向有什么", "literature review", "related work".
 ---
 
-# Literature Survey — 文献综述
+# Literature Survey
 
-从需求澄清到综述成文的完整流程，带交互式论文筛选和迭代修改。
+## Flow
 
-## 交互流程
+1. **Context carry-over**:
+   - **Explicit reference** ("根据已有的", "用刚才的", "基于这些写综述"): use those papers directly. Skip to step 3 — no candidate listing, no selection question.
+   - **Ambiguous** (same topic in context): ASK "刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+   - **No relevant context**: Call `paper_quick_scan(topic, limit=20)`, then show as table and **[FORK]** "全部纳入还是选几篇？"
+3. **Extract structured profiles**: Call `paper_extract(paper_id)` for each selected paper to get structured data (task, method, datasets, baselines, metrics, best_results).
+4. **Build comparison table**: Call `paper_compare_table(paper_ids)` for data-driven comparison instead of LLM-only generation.
+5. Generate survey with structured tables:
+   - **方法分类表**: | 类别 | 代表论文 | 核心思路 | 优势 | 局限 | — built from extracted profiles
+   - **实验对比表**: | 论文 | 数据集 | 指标1 | 指标2 | 最佳结果 | — built from `paper_compare_table` data
+   - **可信度对比**: | 论文 | venue | code | 引用数 | 复现风险 | — call `paper_credibility_batch(paper_ids)`
+   - **研究空白与趋势**: call `paper_field_stats("method_family")` and `paper_field_stats("datasets")` for data-driven insights
+   - **结论与建议**: 当前方向的成熟度判断、主流方法对比结论、研究机会在哪里
+6. **[FORK]** "要修改、补充、还是导出？（BibTeX / Markdown / 保存综述）"
 
-### Phase 1: 需求澄清
+## If user wants to export/save
 
-**必须依次询问用户**：
+- `paper_export(paper_ids, format)` for BibTeX/markdown
+- `paper_group_add(name="survey-{topic}", paper_ids, create_if_missing=True)` to group papers
+- Write survey to `survey/{topic}.md` if user wants to save the narrative
 
-> 🗣️ 综述的主题是什么？
+## Quick mode (default)
 
-> 🗣️ 要覆盖哪些子方向？我帮你拆关键词。
+`paper_quick_scan` returns 15-20 candidates with one-line summaries. Present this list and let user decide next steps. This IS the survey for most cases.
 
-> 🗣️ 时间范围？
-> a) 最近 1 年
-> b) 最近 3 年
-> c) 最近 5 年（推荐综述用）
-> d) 自定义
+## Full mode
 
-> 🗣️ 我拆分的关键词如下，覆盖够吗？要调整吗？
+Only when user explicitly asks for "完整综述" / "full survey" / "详细一点":
+- Expand to 40+ candidates via `paper_quick_scan(topic, limit=40)`
+- Generate multi-section survey with per-paper analysis
 
-### Phase 2: 搜索论文
+## Rules
 
-**工具**: `paper_search_batch(queries, diverse=True)`
-
-呈现各方向命中数后，**必须询问用户**：
-
-> 🗣️ 本地结果{够/不够}。要从在线源（arXiv + Semantic Scholar）补充吗？
-
-如果用户说要：
-**工具**: `paper_search_online(query)`
-
-### Phase 3: 论文筛选
-
-合并去重，按相关度排序，**必须询问用户**：
-
-> 🗣️ 以下是候选论文（共 {n} 篇）。
-> 要纳入综述的论文？可以给编号、"全选"或"前 N 篇"。
-
-**工具**: `paper_batch_show(选中的 IDs)`
-
-### Phase 4: 综述生成
-
-**必须询问用户**：
-
-> 🗣️ 综述包含哪些章节？
-> a) Background  b) 方法分类  c) 实验结果  d) 未来方向  e) 全部
-
-> 🗣️ 你最关注的分析维度是什么？
-
-使用 survey-template 生成综述草稿。
-
-### Phase 5: 迭代修改
-
-> 🗣️ 综述草稿完成。看看哪里需要修改？
-
-### Phase 6: 交付件
-
-> 🗣️ 保存综述吗？
-> - 综述文件  - BibTeX  - 论文分组
-
-**工具**: `paper_export(paper_ids, "bibtex")`
-**工具**: `paper_group_create(topic)` + `paper_group_add(topic, paper_ids)`
-
-## 涉及的 MCP 工具
-
-| 工具 | 阶段 | 用途 |
-|------|------|------|
-| `paper_search_batch` | Phase 2 | 多方向批量搜索 |
-| `paper_search_online` | Phase 2 | 在线补充搜索 |
-| `paper_batch_show` | Phase 3 | 获取论文详情 |
-| `paper_compare` | Phase 4 | 方法对比数据 |
-| `paper_export` | Phase 6 | 导出 BibTeX |
-| `paper_group_create` | Phase 6 | 创建论文分组 |
-| `paper_group_add` | Phase 6 | 添加论文到分组 |
-
-## 可跳转的 Skill
-
-- 想深入某篇 → **paper-agent-deep-dive**
-- 想看引用链 → **paper-agent-citation**
+- 2 checkpoints max (selection + revision/export). Don't ask about search parameters.
+- Default to quick mode. Don't generate a full survey unless asked.
+- Don't auto-save files. Export/save only when user chooses in the FORK.
 """
 
 CITATION_EXPLORE_SKILL = """\
 ---
-name: paper-agent-citation
-description: >-
-  Explore citation chains via Semantic Scholar — forward and backward
-  citations with recursive tracing. Use when user says "引用链",
-  "citations", "这篇引用了什么", "谁引用了它", "追踪引用",
-  "citation trace", or wants to understand a paper's academic context.
-version: 0.2.0
+name: citation-explore
+description: Citation chain exploration. Triggers on "引用链", "谁引了", "citation", "参考文献", "这篇引了谁".
 ---
 
-# Citation Explore — 引用链探索
+# Citation Exploration
 
-从一篇论文出发，递归追踪引用关系，发现关键前置工作和最新进展。
+## Flow
 
-## 交互流程
+1. **Resolve paper_id from context**: If the user says "看引用链" without specifying a paper, use the paper currently being discussed in this conversation. If the user refers to a paper by index (e.g. "第2篇的引用链"), resolve from context. If explicit ID given, use that.
+2. Call `paper_citation_trace(paper_id, direction="both", max_depth=2)` — traces 2 levels automatically
+2. Present results as a tree + key nodes table:
 
-### Phase 1: 起点确认
+   **引用树**: seed → level 1 → level 2 (text tree)
+   **关键节点**: | 论文 | 年份 | 方向 | 被引 | 关系 |
+   **结论**: 哪些是领域关键节点，引用链揭示了什么研究脉络
+3. **[FORK]** "要继续追踪某篇？加到分组？导出引用图谱？还是先这样？"
 
-**工具**: `paper_show(paper_id)`
+## If user picks a paper to trace further
 
-**必须询问用户**：
+Call `paper_citation_trace(new_paper_id)` again for the selected paper.
 
-> 🗣️ 要查哪个方向的引用？
-> a) 它引用了什么（backward）
-> b) 谁引用了它（forward）
-> c) 双向都查（推荐）
+## If user wants to group
 
-### Phase 2: 首层查询
+Call `paper_group_add(name="citation-{seed_title}", paper_ids=[...], create_if_missing=True)`.
 
-**工具**: `paper_citations(paper_id, direction, limit, trace_name)`
+## If user wants to export
 
-**必须询问用户**：
+Write citation tree to `.paper-agent/citation-traces/{seed_id}.md` or user-specified path.
+Optionally `paper_export(paper_ids, format="bibtex")` for references.
 
-> 🗣️ 要深入追踪哪篇？（给编号）还是到此为止？
+## Rules
 
-### Phase 3: 递归追踪（可多轮）
-
-每次追踪后：
-
-> 🗣️ 第 {n} 层追踪完成。要继续追踪吗？
-
-最多 3 层，超过主动提醒。
-
-### Phase 4: 整理
-
-> 🗣️ 探索结束。要做什么？
-> a) 创建分组  b) 标记待读  c) 两个都要  d) 直接看报告
-
-**工具**: `paper_group_create` + `paper_group_add`
-**工具**: `paper_reading_status`
-
-### Phase 5: 交付件
-
-> 🗣️ 要保存引用图谱报告吗？
-> 默认保存到：`.paper-agent/citation-traces/{trace_name}.md`
-
-使用 citation-map-template 生成最终报告。
-
-## 涉及的 MCP 工具
-
-| 工具 | 阶段 | 用途 |
-|------|------|------|
-| `paper_show` | Phase 1 | 确认起点论文 |
-| `paper_citations` | Phase 2-3 | 查询引用关系 |
-| `paper_group_create` | Phase 4 | 创建分组 |
-| `paper_group_add` | Phase 4 | 添加论文到分组 |
-| `paper_reading_status` | Phase 4 | 标记待读 |
-
-## 可跳转的 Skill
-
-- 想深入分析某篇 → **paper-agent-deep-dive**
-- 发现的论文太多 → **paper-agent-triage**
-- 想基于引用链写综述 → **paper-agent-survey**
+- Only 1 checkpoint. The recursive trace is handled by `paper_citation_trace` in one call.
+- Don't ask about direction (both by default) or depth unless user specifies.
+- Present the tree concisely: title + year + direction for each paper.
+- If workspace mode, mention discovered papers were saved to library.
 """
 
 PAPER_TRIAGE_SKILL = """\
 ---
-name: paper-agent-triage
-description: >-
-  Batch paper screening and classification — filter papers by criteria,
-  mark reading status, create groups. Use when user says "帮我筛一下",
-  "triage", "哪些值得读", "分类一下这些论文", "筛选", or has a batch
-  of papers to evaluate.
-version: 0.2.0
+name: paper-triage
+description: Batch paper screening and classification. Triggers on "筛一下", "triage", "哪些值得看", "帮我筛", "batch screen".
 ---
 
-# Paper Triage — 论文筛选分流
+# Paper Triage
 
-对一批论文进行快速筛选，按重要程度分流，批量标记状态。
+## Flow
 
-## 交互流程
+1. **Context carry-over**:
+   - If user explicitly references existing papers ("筛一下刚才的", "帮我筛这些", "筛这些"): triage those directly → `paper_auto_triage(paper_ids=[...])`
+   - If papers in context but reference is ambiguous: ASK "要筛选刚才找到的这些论文？还是筛选库里最近的未读论文？"
+   - If no context → default to `paper_auto_triage(top_n=5)`
+2. **Credibility check**: For papers in the "important" bucket, call `paper_credibility_batch(important_ids)` to add credibility signals.
+3. Present the three buckets as tables:
 
-### Phase 1: 确定范围
+   **重要**: | # | 标题 | 评分 | 入选理由 | venue | code | 复现风险 |
+   **待读**: | # | 标题 | 评分 | 简评 |
+   **跳过**: | # | 标题 | 评分 | 跳过理由 |
+   **结论**: 为什么这几篇最值得关注，关联用户 profile 说明
 
-**必须询问用户**：
+3. **[FORK]** "这是按你 profile 的分类，同意吗？要调整哪些？"
 
-> 🗣️ 要筛选哪些论文？
-> a) 今日推荐的论文
-> b) 某次搜索的结果
-> c) 某个分组里的论文
-> d) 按关键词现搜一批
-> e) 给我一批 paper ID
+## If user adjusts
 
-### Phase 2: 筛选标准
+Move papers between buckets per user's instruction, then:
+- Call `paper_reading_status(important_ids, "important")` for confirmed important papers
+- Call `paper_reading_status(to_read_ids, "to_read")` for to_read papers
 
-**必须询问用户**：
+## If user confirms as-is
 
-> 🗣️ 按什么标准筛选？
-> a) 跟我研究的相关度  b) 方法新颖性  c) 实验质量
-> d) 你帮我判断（推荐）  e) 自定义标准
+Apply the auto-triage result directly:
+- Mark important papers as "important"
+- Mark to_read papers as "to_read"
+- Skip papers get no status change
 
-> 🗣️ 需要重点关注什么？
+After marking, **[FORK]** "已标记完成。要保存筛选报告？还是先这样？"
 
-### Phase 3: AI 筛选建议
+## If user wants to save
 
-**工具**: `paper_profile()` — 获取研究方向
-**工具**: `paper_batch_show(paper_ids)` — 获取论文详情
+Write triage report to `triage/{topic}-{YYYY-MM-DD}.md` using triage-template.
 
-AI 按三档分流：⭐ 重要 / 📖 待读 / ⏭️ 跳过
+## Custom source
 
-> 🗣️ 同意这个分类吗？要调整哪些？
+If user provides specific paper IDs or says "筛这些":
+- Call `paper_auto_triage(paper_ids=[...])` with the specific IDs
 
-### Phase 4: 执行操作
+## Rules
 
-**工具**: `paper_reading_status(important_ids, "important")`
-**工具**: `paper_reading_status(to_read_ids, "to_read")`
-
-> 🗣️ 要把"重要"的论文加到某个分组吗？
-
-**工具**: `paper_group_create(name)` 或 `paper_group_add(name, ids)`
-
-### Phase 5: 交付件
-
-> 🗣️ 要保存筛选报告吗？
-> 默认保存到：`triage/{topic}-{YYYY-MM-DD}.md`
-
-使用 triage-template 生成报告。
-
-## 涉及的 MCP 工具
-
-| 工具 | 阶段 | 用途 |
-|------|------|------|
-| `paper_digest` / `paper_search` / `paper_group_show` | Phase 1 | 获取候选论文 |
-| `paper_batch_show` | Phase 1 | 获取论文详情 |
-| `paper_profile` | Phase 3 | 获取用户研究方向 |
-| `paper_reading_status` | Phase 4 | 批量标记状态 |
-| `paper_group_create` | Phase 4 | 创建分组 |
-| `paper_group_add` | Phase 4 | 添加到分组 |
-
-## 可跳转的 Skill
-
-- 想深入某篇"重要"论文 → **paper-agent-deep-dive**
-- 想基于筛选结果写综述 → **paper-agent-survey**
+- Only 1 checkpoint (confirm/adjust). Classification is automatic via `paper_auto_triage`.
+- Don't ask about criteria — use profile-based relevance scores by default.
+- Don't ask about source — default to recent unread papers.
+- Always use tables, never bullet-point lists for paper results.
+- Always include a 结论 section explaining why the classification matters.
 """
 
 RESEARCH_INSIGHT_SKILL = """\
 ---
-name: paper-agent-insight
-description: >-
-  Research trend analysis and insight generation — method evolution,
-  hot topics, key teams, research gaps. Use when user says "趋势",
-  "洞察", "insight", "这个方向的发展", "什么方法在兴起", "研究热点",
-  "trend analysis", or wants to understand the landscape of a research area.
-version: 0.2.0
+name: research-insight
+description: Research trend analysis and insight generation. Triggers on "趋势", "trend", "这个方向火不火", "research insight", "方向分析".
 ---
 
-# Research Insight — 研究趋势洞察
+# Research Insight
 
-分析某个研究方向的趋势、演进、关键团队和研究空白，产出结构化洞察报告。
+## Flow
 
-## 交互流程
+1. **Context carry-over**:
+   - If user explicitly references existing papers ("根据刚才的", "用这些做趋势分析"): use those papers directly as landscape
+   - If papers in context on the same topic but reference is ambiguous: ASK "刚才找到了 N 篇相关论文，基于这些做趋势分析？还是重新搜索？"
+   - If no context → call `paper_quick_scan(topic, limit=20)` directly
+2. Call `paper_trend_data(topic, years_back=3)` for publication counts and trends
+3. Present as structured tables:
 
-### Phase 1: 洞察范围
+   **趋势总览**: | 子方向 | 2023 | 2024 | 2025 | 趋势 |
+   **热门论文**: | # | 标题 | 年份 | 引用 | 一句话 |
+   **主要会议分布**: | 会议 | 论文数 | 代表工作 |
+   **结论与建议**: 方向整体判断（上升/成熟/衰退）、最有潜力的子方向、入场时机建议
+4. **[FORK]** "要深入某个子方向？导出分析报告？还是先这样？"
 
-**必须依次询问用户**：
+## If user wants to go deeper
 
-> 🗣️ 你想了解哪些方向的趋势？
+Route to **literature-survey** skill with the selected sub-direction as topic.
 
-> 🗣️ 关注哪些会议/期刊？
-> a) 通用 AI 顶会  b) EDA/硬件  c) 自定义  d) 不限
+## If user wants to export
 
-> 🗣️ 时间范围？
-> a) 最近 1 年  b) 最近 3 年（推荐）  c) 最近 5 年  d) 自定义
+Write insight report to `insight/{topic}-{YYYY-MM-DD}.md`.
 
-> 🗣️ 你最关注什么？（可多选）
-> a) 方法演进趋势  b) 热门主题变化  c) 关键团队与人物
-> d) 研究空白与机会  e) 产业落地情况  f) 全部  g) 自定义
+## Quick mode (default)
 
-### Phase 2: 数据收集
+The above flow IS the quick mode. Two tool calls + AI formatting. No extra questions.
 
-**工具**: `paper_search_batch(queries_by_year_and_direction, diverse=True)`
-**工具**: `paper_search_online(query)`
-**工具**: `paper_stats()`
+## Full mode
 
-> 🗣️ 数据收集完成。数据够做分析吗？要补充搜索吗？
+Only when user explicitly asks for "详细分析" / "deep analysis":
+- Expand `paper_quick_scan(topic, limit=40)`
+- Expand `paper_trend_data(topic, years_back=5)`
+- Generate a detailed report with method evolution timeline, key contributor analysis
 
-### Phase 3: 分析与呈现
+## Rules
 
-使用 insight-template 生成洞察报告（只展开用户选择的维度）。
-
-### Phase 4: 深入探索
-
-> 🗣️ 洞察报告草稿完成。你想：
-> a) 深入看某个趋势
-> b) 追踪某个方法的引用链 → **paper-agent-citation**
-> c) 某个方向做个综述 → **paper-agent-survey**
-> d) 修改报告
-> e) 满意，保存报告
-
-### Phase 5: 交付件
-
-> 🗣️ 保存洞察报告吗？
-> - 报告文件  - 标记高影响力论文为"待读"？  - 创建分组？
-
-**工具**: `paper_reading_status`, `paper_group_create`, `paper_group_add`
-
-## 涉及的 MCP 工具
-
-| 工具 | 阶段 | 用途 |
-|------|------|------|
-| `paper_search_batch` | Phase 2 | 按年份×方向批量搜索 |
-| `paper_search_online` | Phase 2 | 在线补充数据 |
-| `paper_stats` | Phase 2 | 库统计 |
-| `paper_profile` | Phase 3 | 对齐用户研究方向 |
-| `paper_batch_show` | Phase 3 | 获取论文详情 |
-| `paper_citations` | Phase 4 | 引用链追踪 |
-| `paper_reading_status` | Phase 5 | 标记阅读状态 |
-| `paper_group_create` | Phase 5 | 创建分组 |
-| `paper_group_add` | Phase 5 | 添加到分组 |
-
-## 可跳转的 Skill
-
-- 深入引用链 → **paper-agent-citation**
-- 某方向做综述 → **paper-agent-survey**
-- 筛选高影响力论文 → **paper-agent-triage**
-- 深入分析某篇 → **paper-agent-deep-dive**
+- Only 1 checkpoint. The data gathering is fully automatic via `paper_quick_scan` + `paper_trend_data`.
+- Don't ask about time range or sub-topics upfront — use defaults.
+- Present trend data as a compact table with arrows (trend: up/down/stable).
+- Don't auto-save files. Export only when user chooses in the FORK.
 """
 
-# ── Skill registry for setup commands ────────────────────────────
+RESEARCH_PLANNING_SKILL = """\
+---
+name: research-planning
+description: Bridge from paper analysis to research action. Triggers on "启发", "idea", "实验计划", "reading pack", "这篇能给我什么", "research plan", "experiment plan".
+---
 
+# Research Planning
+
+## Flow
+
+1. **Detect sub-intent**:
+   - "这篇/这些能给我什么启发" / "research ideas" → Ideation mode
+   - "实验计划" / "能不能复现" / "experiment plan" → Experiment planning mode
+   - "给我组个 reading pack" / "怎么读这个方向" → Reading pack mode
+
+2. **Ensure research context**: Call `paper_set_context()` if no context exists, or ask user for project/baseline/questions.
+
+### Ideation Mode
+
+1. Resolve paper IDs from context (or ask user which papers)
+2. Call `paper_ideate(paper_ids)` — generates 3-5 ranked ideas
+3. Present ideas with feasibility/novelty assessment
+4. **[FORK]** "深入某个想法？组 reading pack？还是先这样？"
+
+### Experiment Planning Mode
+
+1. Resolve single paper ID
+2. Call `paper_experiment_plan(paper_id)` — analyzes reproducible/improvable/replaceable parts
+3. Present plan with workload and risk assessment
+4. **[FORK]** "开始某个实验？需要补充阅读？还是先这样？"
+
+### Reading Pack Mode
+
+1. Get research question from user (or infer from context)
+2. Call `paper_reading_pack(question, limit=10)`
+3. Present ordered reading list with rationale and depth suggestion
+4. **[FORK]** "调整顺序？加减论文？导出为文件？"
+
+## Rules
+
+- Always try to set research context first for better personalization.
+- 2 checkpoints max per mode.
+- Don't auto-save files. Export only when user asks.
+"""
+
+# Registry for programmatic access
 WORKFLOW_SKILLS: dict[str, str] = {
-    "paper-agent-daily-reading": DAILY_READING_SKILL,
-    "paper-agent-deep-dive": DEEP_DIVE_SKILL,
-    "paper-agent-survey": LITERATURE_SURVEY_SKILL,
-    "paper-agent-citation": CITATION_EXPLORE_SKILL,
-    "paper-agent-triage": PAPER_TRIAGE_SKILL,
-    "paper-agent-insight": RESEARCH_INSIGHT_SKILL,
-}
-
-# ── Deliverable Templates ────────────────────────────────────────
-
-DAILY_DIGEST_TEMPLATE = """\
-# Daily Digest Template
-
-Use this template when generating daily reading summaries.
-File name: `daily/{YYYY-MM-DD}.md`
-
-## Template Structure
-
-```markdown
-# 每日阅读摘要 — {date}
-
-## 上下文恢复
-- 昨日进展: {workspace_context summary}
-- 阅读进度: 待读 {n} | 阅读中 {n} | 已读 {n} | 重要 {n}
-
-## 今日采集
-| 来源 | 数量 |
-|------|------|
-| arXiv | {n} |
-| DBLP | {n} |
-| Semantic Scholar | {n} |
-
-## 高置信推荐
-| # | 标题 | 评分 | 核心贡献 | 状态 |
-|---|------|------|---------|------|
-
-## 补充参考
-| # | 标题 | 评分 | 简评 |
-|---|------|------|------|
-
-## 今日计划
-- [ ] 深入阅读: {选中的论文}
-- [ ] 待跟进: {AI 建议}
-```
-"""
-
-ANALYSIS_TEMPLATE = """\
-# Paper Analysis Template
-
-Use this template when generating deep analysis notes for papers.
-Save via `paper_note_add(paper_id, content, "ai_analysis")`.
-
-## Key Rules
-
-1. Ask the user which analysis angles to cover FIRST
-2. "与我研究的关联" MUST reference `paper_profile` research direction
-3. Keep technical terms in English, explanations in Chinese
-4. Only expand sections the user selected
-
-## Template Structure
-
-```markdown
-# {论文标题} — 深度分析
-
-> 分析角度: {user-selected angles}
-> 分析日期: {date}
-
-## 核心信息
-| 字段 | 值 |
-|------|---|
-| ID | {paper_id} |
-| 作者 | {authors} |
-| 发布时间 | {published_at} |
-| 评分 | {score}/10 |
-
-## 摘要翻译
-{Chinese translation preserving technical terms}
-
-## 要点提炼
-1. {Key contribution 1}
-2. {Key contribution 2}
-3. {Key contribution 3}
-
-## 方法创新点 {if angle a}
-### 核心思想 / 方法框架 / 与前人区别
-
-## 实验设计 {if angle b}
-### Benchmark / 主要结果 / 消融实验
-
-## 与我研究的关联 {if angle c}
-### 交叉点 / 可借鉴方法 / 启发
-
-## 局限与改进空间 {if angle d}
-### 局限性 / 改进方向 / 适用场景
-
-## 研究价值评估
-| 维度 | 评分 | 说明 |
-|------|------|------|
-| 创新性 / 实用性 / 可复现性 / 影响力 |
-
-## 行动建议
-- [ ] {actionable suggestion}
-```
-"""
-
-SURVEY_TEMPLATE = """\
-# Literature Survey Template
-
-Use this template when generating literature surveys.
-File name: `survey/{topic}.md`
-
-## Key Rules
-
-1. Only include sections the user selected in Phase 4
-2. Comparison table dimensions come from user's specified focus
-3. Each method category must cite representative papers
-4. Research gaps must be specific and actionable
-
-## Template Structure
-
-```markdown
-# {topic} — 文献综述
-
-> 覆盖时间: {start}—{end}  |  论文数量: {n}
-> 关键词: {keywords}  |  关注维度: {focus}
-
-## 1. 引言与背景
-## 2. 方法分类 (2.1 方向A / 2.2 方向B / ...)
-## 3. 方法对比 (table + analysis)
-## 4. 实验对比
-## 5. 研究空白与未来方向
-## 6. 总结
-## 参考文献
-```
-"""
-
-CITATION_MAP_TEMPLATE = """\
-# Citation Map Template
-
-Use this template for citation trace reports.
-File name: `.paper-agent/citation-traces/{trace_name}.md`
-
-## Template Structure
-
-```markdown
-# 引用图谱: {起点论文标题}
-
-> 起点论文: {title} ({year})
-> 探索深度: {n} 层
-> 发现论文: {n} 篇
-
-## 引用关系图 (tree format)
-## 关键发现
-### 开创性工作 / 最新进展 / 高被引枢纽
-## 建议阅读顺序
-## 研究脉络总结
-```
-"""
-
-TRIAGE_TEMPLATE = """\
-# Paper Triage Template
-
-Use this template for paper screening reports.
-File name: `triage/{topic}-{YYYY-MM-DD}.md`
-
-## Template Structure
-
-```markdown
-# 论文筛选报告 — {topic}
-
-> 候选论文: {n}  |  筛选日期: {date}
-> 筛选标准: {criteria}  |  重点关注: {focus}
-
-## 筛选总结
-| 分类 | 数量 | 占比 |
-|------|------|------|
-
-## ⭐ 重要 — 精读建议
-| # | 标题 | 评分 | 年份 | 入选理由 |
-
-## 📖 待读 — 泛读建议
-| # | 标题 | 评分 | 年份 | 简评 |
-
-## ⏭️ 跳过
-| # | 标题 | 评分 | 跳过理由 |
-
-## 操作记录
-```
-"""
-
-INSIGHT_TEMPLATE = """\
-# Research Insight Template
-
-Use this template for trend analysis reports.
-File name: `insight/{topic}-{YYYY-MM-DD}.md`
-
-## Key Rules
-
-1. Only expand dimensions the user selected in Phase 1
-2. All trend judgments must be backed by data (paper counts, citation counts)
-3. "Emerging" = first appeared in the last 6-12 months
-4. "Research gaps" must be specific enough to write a proposal
-5. Method trends use ↑↑/↑/→/↓/↓↓ markers with data
-
-## Template Structure
-
-```markdown
-# 研究趋势洞察 — {topic}
-
-> 分析范围: {directions}  |  时间跨度: {start}—{end}
-> 会议/期刊: {venues}  |  数据基础: {n} 篇
-
-## 执行摘要 (3-5 sentences)
-
-## 1. 趋势总览 (paper counts by year × direction)
-## 2. 方法演进趋势 {if user selected a}
-## 3. 热门主题变化 {if user selected b}
-## 4. 关键团队与人物 {if user selected c}
-## 5. 研究空白与机会 {if user selected d}
-## 6. 产业落地情况 {if user selected e}
-## 7. 高影响力论文 Top-10
-## 8. 新兴方向
-## 9. 行动建议
-```
-"""
-
-SKILL_TEMPLATES: dict[str, str] = {
-    "paper-agent-daily-reading": DAILY_DIGEST_TEMPLATE,
-    "paper-agent-deep-dive": ANALYSIS_TEMPLATE,
-    "paper-agent-survey": SURVEY_TEMPLATE,
-    "paper-agent-citation": CITATION_MAP_TEMPLATE,
-    "paper-agent-triage": TRIAGE_TEMPLATE,
-    "paper-agent-insight": INSIGHT_TEMPLATE,
-}
-
-TEMPLATE_FILENAMES: dict[str, str] = {
-    "paper-agent-daily-reading": "daily-digest-template.md",
-    "paper-agent-deep-dive": "analysis-template.md",
-    "paper-agent-survey": "survey-template.md",
-    "paper-agent-citation": "citation-map-template.md",
-    "paper-agent-triage": "triage-template.md",
-    "paper-agent-insight": "insight-template.md",
+    "daily-reading": DAILY_READING_SKILL,
+    "deep-dive": DEEP_DIVE_SKILL,
+    "literature-survey": LITERATURE_SURVEY_SKILL,
+    "citation-explore": CITATION_EXPLORE_SKILL,
+    "paper-triage": PAPER_TRIAGE_SKILL,
+    "research-insight": RESEARCH_INSIGHT_SKILL,
+    "research-planning": RESEARCH_PLANNING_SKILL,
 }

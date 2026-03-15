@@ -1,41 +1,16 @@
-# Python
 __pycache__/
 *.py[cod]
 *$py.class
+.venv/
 *.egg-info/
 dist/
 build/
-.venv/
-*.egg
-
-# Type checking & linting
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
-
-# Data & secrets
 *.db
 *.sqlite
 .env
 .env.local
 *.log
-
-# IDE
 .idea/
-.vscode/
-.cursor/
-.claude/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Project-specific: internal docs (not for public release)
-docs/
-
-# Project-specific: local dev files
-USER-JOURNEY.md
-plugin/USER-JOURNEY.md
-poetry.lock

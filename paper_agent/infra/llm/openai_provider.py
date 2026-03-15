@@ -13,7 +13,12 @@ from paper_agent.infra.llm.llm_provider import LLMProvider
 
 class OpenAIProvider(LLMProvider):
     def __init__(self, api_key: str, model: str = "", base_url: str = "") -> None:
-        self._client = openai.OpenAI(api_key=api_key, base_url=base_url if base_url else None)
+        self._client = openai.OpenAI(
+            api_key=api_key,
+            base_url=base_url if base_url else None,
+            timeout=60.0,
+            max_retries=2,
+        )
         self._model = model or "gpt-4o-mini"
 
     def score_relevance(

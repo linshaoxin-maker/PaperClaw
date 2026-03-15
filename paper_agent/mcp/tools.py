@@ -56,6 +56,17 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                 not_found.append(pid)
         return found, not_found
 
+    def _extract_arxiv_id(paper: Paper) -> str:
+        """Extract arXiv ID from a paper regardless of its source."""
+        if paper.canonical_key.startswith("arxiv:"):
+            return paper.canonical_key[6:]
+        meta = paper.metadata or {}
+        if meta.get("arxiv_id"):
+            return meta["arxiv_id"]
+        if _ARXIV_ID_RE.match(paper.source_paper_id or ""):
+            return paper.source_paper_id
+        return ""
+
     @mcp.tool()
     def paper_search(query: str, limit: int = 20, diverse: bool = False) -> str:
         """Search the local paper library using full-text search.
@@ -426,14 +437,24 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         """Get workspace context for session recovery.
 
         Returns recent journal entries, reading stats, collection list,
-        and citation traces. Use this at the start of a conversation to
-        understand what the researcher has been working on.
+        citation traces, and a ``mode`` field indicating the user type:
+        - ``"workspace"``: user has reading-list entries or journal activity
+        - ``"lightweight"``: workspace is empty or doesn't exist
+
+        Use ``mode`` to decide whether to show workspace features (reading
+        progress, groups, status marks) or just present raw results.
 
         Returns:
-            JSON object with journal, reading stats, collections, traces.
+            JSON object with mode, journal, reading stats, collections, traces.
         """
         _ensure_workspace()
         result = ctx.workspace_manager.get_context()
+
+        stats = result.get("reading_stats", {})
+        journal = result.get("journal_recent", [])
+        has_activity = bool(journal) or any(stats.get(k, 0) > 0 for k in ("to_read", "reading", "read", "important"))
+        result["mode"] = "workspace" if has_activity else "lightweight"
+
         return json.dumps(result, ensure_ascii=False, default=str)
 
     @mcp.tool()
@@ -445,12 +466,15 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             status: One of 'to_read', 'reading', 'read', 'important'.
 
         Returns:
-            JSON object with update count and reading stats.
+            JSON object with update count, reading stats, and first_use flag.
         """
         _ensure_workspace()
         valid = {"to_read", "reading", "read", "important"}
         if status not in valid:
             return json.dumps({"error": f"Invalid status '{status}'. Use: {sorted(valid)}"})
+
+        existing_stats = ctx.storage.get_reading_stats()
+        first_use = sum(existing_stats.values()) == 0
 
         resolved_ids: list[str] = []
         not_found: list[str] = []
@@ -473,6 +497,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             "status": "ok",
             "updated": updated,
             "reading_stats": stats,
+            "first_use": first_use,
         }
         if not_found:
             result["not_found"] = not_found
@@ -499,22 +524,27 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         }, ensure_ascii=False, default=str)
 
     @mcp.tool()
-    def paper_note_add(paper_id: str, content: str, source: str = "user") -> str:
-        """Add a note to a paper.
+    def paper_note_add(paper_id: str, content: str, source: str = "user", mark_as: str | None = None) -> str:
+        """Add a note to a paper, optionally setting its reading status.
 
         Args:
             paper_id: Paper ID (internal, canonical, or arXiv ID).
             content: Note content (markdown supported).
             source: Note source — 'user' for manual notes, 'ai_analysis' for
                     AI-generated analysis.
+            mark_as: Optionally set reading status in the same call.
+                     One of 'to_read', 'reading', 'read', 'important', or None.
 
         Returns:
-            JSON object with note ID and file path.
+            JSON object with note ID, file path, and first_use flag.
         """
         _ensure_workspace()
         paper = _resolve_paper(paper_id)
         if not paper:
             return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        notes_dir = ctx.workspace_manager._root / "notes"
+        first_use = not notes_dir.exists() or not any(notes_dir.iterdir())
 
         note_id = uuid.uuid4().hex[:12]
         ctx.storage.save_note(note_id, paper.id, content, source)
@@ -523,12 +553,25 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             f"添加笔记: {paper.title[:60]}",
             {"paper_id": paper.id, "source": source},
         )
-        return json.dumps({
+
+        result: dict[str, Any] = {
             "status": "ok",
             "note_id": note_id,
             "paper_id": paper.id,
             "file": str(file_path) if file_path else None,
-        }, ensure_ascii=False, default=str)
+            "first_use": first_use,
+        }
+
+        if mark_as:
+            valid = {"to_read", "reading", "read", "important"}
+            if mark_as in valid:
+                ctx.storage.update_reading_status([paper.id], mark_as)
+                ctx.workspace_manager.rebuild_reading_list()
+                result["marked_as"] = mark_as
+            else:
+                result["mark_as_error"] = f"Invalid status '{mark_as}'. Use: {sorted(valid)}"
+
+        return json.dumps(result, ensure_ascii=False, default=str)
 
     @mcp.tool()
     def paper_note_show(paper_id: str) -> str:
@@ -582,12 +625,13 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         }, ensure_ascii=False, default=str)
 
     @mcp.tool()
-    def paper_group_add(name: str, paper_ids: list[str]) -> str:
-        """Add papers to an existing group.
+    def paper_group_add(name: str, paper_ids: list[str], create_if_missing: bool = False) -> str:
+        """Add papers to a group, optionally creating it if it doesn't exist.
 
         Args:
             name: Group name.
             paper_ids: List of paper IDs to add.
+            create_if_missing: If True, auto-create the group when it doesn't exist.
 
         Returns:
             JSON object with add count and group total.
@@ -595,7 +639,12 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         _ensure_workspace()
         group = ctx.storage.get_group(name)
         if not group:
-            return json.dumps({"error": f"Group '{name}' not found. Create it first with paper_group_create."})
+            if create_if_missing:
+                group_id = uuid.uuid4().hex[:12]
+                ctx.storage.create_group(group_id, name)
+                group = ctx.storage.get_group(name)
+            else:
+                return json.dumps({"error": f"Group '{name}' not found. Create it first with paper_group_create, or pass create_if_missing=True."})
 
         resolved_ids: list[str] = []
         not_found: list[str] = []
@@ -827,11 +876,11 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         paper_ids: list[str],
         format: str = "bibtex",
     ) -> str:
-        """Export papers to BibTeX, markdown, or JSON format.
+        """Export papers to BibTeX, markdown, Obsidian, or JSON format.
 
         Args:
             paper_ids: List of paper IDs to export.
-            format: Output format — "bibtex", "markdown", or "json".
+            format: Output format — "bibtex", "markdown", "obsidian", or "json".
 
         Returns:
             JSON object containing the exported content as a string.
@@ -874,13 +923,74 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                 lines.append("")
             content = "\n".join(lines)
 
+        elif format == "obsidian":
+            pages: list[str] = []
+            for p in found:
+                year = str(p.published_at.year) if p.published_at else "N/A"
+                authors = ", ".join(p.authors[:5])
+                tags = " ".join(f"#{t.replace(' ', '_')}" for t in p.topics[:5])
+                profile = ctx.storage.get_paper_profile(p.id)
+
+                page_lines = [
+                    f"---",
+                    f"title: \"{p.title}\"",
+                    f"authors: [{authors}]",
+                    f"year: {year}",
+                    f"url: {p.url}",
+                    f"score: {p.relevance_score}",
+                    f"status: {p.reading_status or 'unread'}",
+                    f"tags: [{', '.join(p.topics[:5])}]",
+                    f"---",
+                    f"",
+                    f"# {p.title}",
+                    f"",
+                    f"{tags}",
+                    f"",
+                    f"**Authors**: {authors}",
+                    f"**Year**: {year}",
+                    f"**URL**: {p.url}",
+                    f"",
+                    f"## Abstract",
+                    f"",
+                    f"{p.abstract}",
+                    f"",
+                ]
+
+                if profile:
+                    page_lines.extend([
+                        f"## Structured Profile",
+                        f"",
+                        f"- **Task**: {profile.task}",
+                        f"- **Method**: {profile.method_name or profile.method_family}",
+                        f"- **Datasets**: {', '.join(profile.datasets)}",
+                        f"- **Baselines**: {', '.join(profile.baselines)}",
+                        f"- **Metrics**: {', '.join(profile.metrics)}",
+                        f"- **Code**: {profile.code_url or 'N/A'}",
+                        f"- **Venue**: {profile.venue}",
+                        f"",
+                    ])
+
+                page_lines.extend([
+                    f"## Notes",
+                    f"",
+                    f"",
+                ])
+
+                pages.append("\n".join(page_lines))
+
+            content = "\n---\n\n".join(pages)
+
         elif format == "json":
-            content = json.dumps(
-                [p.to_detail_dict() for p in found],
-                ensure_ascii=False, default=str, indent=2,
-            )
+            export_data: list[dict] = []
+            for p in found:
+                d = p.to_detail_dict()
+                profile = ctx.storage.get_paper_profile(p.id)
+                if profile:
+                    d["profile"] = profile.to_dict()
+                export_data.append(d)
+            content = json.dumps(export_data, ensure_ascii=False, default=str, indent=2)
         else:
-            return json.dumps({"error": f"Unsupported format: {format}. Use bibtex, markdown, or json."})
+            return json.dumps({"error": f"Unsupported format: {format}. Use bibtex, markdown, obsidian, or json."})
 
         return json.dumps({
             "status": "ok",
@@ -922,19 +1032,29 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         client = _httpx.Client(timeout=60.0, follow_redirects=True, trust_env=True)
         try:
             for p in found:
-                arxiv_id = p.source_paper_id
-                if not arxiv_id and p.canonical_key.startswith("arxiv:"):
-                    arxiv_id = p.canonical_key[6:]
+                arxiv_id = _extract_arxiv_id(p)
+                meta = p.metadata or {}
+                pdf_url: str | None = None
 
-                if not arxiv_id:
+                if arxiv_id:
+                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                elif meta.get("pdf_url"):
+                    pdf_url = meta["pdf_url"]
+                elif meta.get("doi"):
+                    pdf_url = f"https://doi.org/{meta['doi']}"
+
+                if not pdf_url:
                     results.append({
                         "id": p.id, "title": p.title,
-                        "status": "skipped", "reason": "Not an arXiv paper",
+                        "status": "skipped",
+                        "reason": "No arXiv ID or open-access PDF URL available",
                     })
                     continue
 
+                file_id = arxiv_id or p.source_paper_id or p.id
+                file_id = re.sub(r"[/\\:]", "_", file_id)
                 safe_name = re.sub(r"[^\w\s-]", "", p.title)[:80].strip().replace(" ", "_")
-                filename = f"{arxiv_id}_{safe_name}.pdf"
+                filename = f"{file_id}_{safe_name}.pdf"
                 filepath = out / filename
 
                 if filepath.exists():
@@ -944,7 +1064,6 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                     })
                     continue
 
-                pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
                 try:
                     resp = client.get(pdf_url)
                     if resp.status_code == 200 and len(resp.content) > 1000:
@@ -976,6 +1095,76 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             "failed": len(results) - downloaded - existed,
             "results": results,
             "not_found": not_found,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_save_report(
+        report_type: str,
+        content: str,
+        filename: str | None = None,
+    ) -> str:
+        """Save a structured report to the workspace as a markdown file.
+
+        Use this after generating any analysis output (daily digest, triage
+        report, survey, insight, comparison, analysis note, or reading pack)
+        to persist the result to disk. The file is saved into the appropriate
+        subdirectory under .paper-agent/.
+
+        Args:
+            report_type: One of "daily_digest", "triage", "survey", "insight",
+                         "comparison", "analysis", "citation_map", "reading_pack",
+                         "ideation", "experiment_plan", "search_result".
+            content: The full markdown content to save.
+            filename: Optional custom filename (without directory path).
+                      If omitted, auto-generated from type + date.
+                      Examples: "2025-03-15.md", "GNN-placement.md",
+                                "transformer-vs-cnn-2025-03-15.md".
+
+        Returns:
+            JSON with status, saved file path, and report type.
+        """
+        ctx.workspace_manager.ensure_initialized()
+        try:
+            path = ctx.workspace_manager.save_report(
+                report_type=report_type,
+                content=content,
+                filename=filename,
+            )
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+
+        return json.dumps({
+            "status": "ok",
+            "report_type": report_type,
+            "path": str(path),
+            "filename": path.name,
+        }, ensure_ascii=False)
+
+    @mcp.tool()
+    def paper_list_reports(
+        report_type: str | None = None,
+    ) -> str:
+        """List saved reports in the workspace, optionally filtered by type.
+
+        Shows all previously saved deliverables (daily digests, triage reports,
+        surveys, insights, comparisons, analysis notes, reading packs, and
+        citation maps).
+
+        Args:
+            report_type: Filter by type. One of "daily_digest", "triage",
+                         "survey", "insight", "comparison", "analysis",
+                         "citation_map", "reading_pack", "ideation",
+                         "experiment_plan", "search_result".
+                         If omitted, lists all report types.
+
+        Returns:
+            JSON with a list of reports (type, filename, path, modified date).
+        """
+        reports = ctx.workspace_manager.list_reports(report_type=report_type)
+        return json.dumps({
+            "status": "ok",
+            "count": len(reports),
+            "reports": reports,
         }, ensure_ascii=False, default=str)
 
     @mcp.tool()
@@ -1263,7 +1452,8 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             out.mkdir(parents=True, exist_ok=True)
 
             safe_name = re.sub(r"[^\w\s-]", "", paper_obj.title)[:80].strip().replace(" ", "_")
-            src_id = paper_obj.source_paper_id or paper_obj.id
+            src_id = _extract_arxiv_id(paper_obj) or paper_obj.source_paper_id or paper_obj.id
+            src_id = re.sub(r"[/\\:]", "_", src_id)
             filename = f"{src_id}_{safe_name}.pdf"
             filepath = out / filename
 
@@ -1293,3 +1483,1064 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
 
         result["status"] = "ok"
         return json.dumps(result, ensure_ascii=False, default=str)
+
+    # ── v03: Capability-sunk tools ─────────────────────────────────────
+
+    @mcp.tool()
+    def paper_quick_scan(
+        topic: str,
+        limit: int = 20,
+        supplement_online: bool = True,
+    ) -> str:
+        """Quick-scan a research topic: local search + optional online supplement, deduplicated and ranked.
+
+        Consolidates the multi-step pattern (search_batch → search_online → merge)
+        into a single atomic call.  Use for lightweight survey, trend scouting, or
+        answering "what work exists on X".
+
+        Args:
+            topic: Research topic or question in natural language.
+            limit: Maximum papers to return (default 20).
+            supplement_online: If True and local results < limit, automatically
+                               search arXiv + Semantic Scholar to fill the gap.
+
+        Returns:
+            JSON with ranked paper list, source breakdown, and total candidates.
+        """
+        local_result = ctx.search_engine.search(topic, limit=limit * 2, diverse=True)
+        local_papers = local_result.papers
+
+        online_papers: list[Paper] = []
+        online_count = 0
+
+        if supplement_online and len(local_papers) < limit:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            def _search_arxiv_online() -> list[Paper]:
+                from paper_agent.infra.sources.arxiv_adapter import ARXIV_API_URL, ArxivAdapter
+                import httpx as _httpx
+
+                adapter = ArxivAdapter()
+                search_query = "+AND+".join(f"all:{w}" for w in topic.split() if w.strip())
+                url = (
+                    f"{ARXIV_API_URL}?search_query={search_query}"
+                    f"&start=0&max_results={limit}&sortBy=relevance&sortOrder=descending"
+                )
+                client = _httpx.Client(timeout=30.0, follow_redirects=True, trust_env=True)
+                try:
+                    resp = client.get(url)
+                    return adapter._parse_response(resp.text) if resp.status_code == 200 else []
+                finally:
+                    client.close()
+
+            def _search_s2_online() -> list[Paper]:
+                from paper_agent.infra.sources.semantic_scholar_adapter import SemanticScholarAdapter
+                adapter = SemanticScholarAdapter()
+                return adapter.discover(keywords=[w for w in topic.split() if w.strip()], max_results=limit)
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = {executor.submit(_search_arxiv_online): "arxiv", executor.submit(_search_s2_online): "s2"}
+                for future in as_completed(futures):
+                    try:
+                        online_papers.extend(future.result())
+                    except Exception:
+                        pass
+            online_count = len(online_papers)
+            if online_papers:
+                ctx.storage.save_papers(online_papers)
+
+        seen: set[str] = set()
+        merged: list[Paper] = []
+        for p in local_papers + online_papers:
+            key = p.canonical_key or p.id
+            if key not in seen:
+                seen.add(key)
+                merged.append(p)
+
+        if ctx.search_engine._profile:
+            merged = ctx.search_engine.rank_results(merged, topic)
+        else:
+            merged.sort(key=lambda p: p.relevance_score or 0, reverse=True)
+
+        papers_out = []
+        for p in merged[:limit]:
+            papers_out.append({
+                "id": p.id,
+                "title": p.title,
+                "authors": p.authors[:3] if p.authors else [],
+                "year": p.published_at.year if p.published_at else None,
+                "score": round(p.relevance_score, 1) if p.relevance_score else None,
+                "source": p.source_name,
+                "abstract_snippet": (p.abstract or "")[:200],
+            })
+
+        return json.dumps({
+            "status": "ok",
+            "topic": topic,
+            "papers": papers_out,
+            "total_candidates": len(merged),
+            "local_count": len(local_papers),
+            "online_count": online_count,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_auto_triage(
+        paper_ids: list[str] | None = None,
+        top_n: int = 5,
+        source: str = "recent",
+    ) -> str:
+        """Automatically classify papers into importance buckets using existing relevance scores.
+
+        No extra LLM calls — uses scores already computed during collection.
+        Papers are split into three buckets:
+        - important (score >= 8, up to top_n)
+        - to_read (score 5–7.9)
+        - skip (score < 5)
+
+        Args:
+            paper_ids: Specific paper IDs to triage.  If None, triages
+                       recent unread papers (last 7 days, no reading status).
+            top_n: Max papers in the 'important' bucket (default 5).
+            source: When paper_ids is None, which papers to auto-select.
+                    'recent' = last 7 days, 'unread' = all without reading status.
+
+        Returns:
+            JSON with three buckets, each containing paper summaries with scores and reasons.
+        """
+        if paper_ids:
+            papers, not_found = _resolve_papers(paper_ids)
+        else:
+            from datetime import datetime, timedelta
+
+            all_papers = ctx.storage.get_all_papers(
+                limit=500 if source == "unread" else 200,
+            )
+            papers = [p for p in all_papers if not p.reading_status]
+            if source == "recent":
+                cutoff_naive = datetime.utcnow() - timedelta(days=7)
+                def _after_cutoff(p):  # noqa: E301
+                    if not p.published_at:
+                        return False
+                    pa = p.published_at.replace(tzinfo=None) if p.published_at.tzinfo else p.published_at
+                    return pa >= cutoff_naive
+                papers = [p for p in papers if _after_cutoff(p)]
+            not_found = []
+
+        important: list[dict[str, Any]] = []
+        to_read: list[dict[str, Any]] = []
+        skip: list[dict[str, Any]] = []
+
+        for p in papers:
+            score = p.relevance_score or 0
+            entry = {
+                "id": p.id,
+                "title": p.title,
+                "score": round(score, 1),
+                "reason": p.recommendation_reason or "",
+                "source": p.source_name,
+                "year": p.published_at.year if p.published_at else None,
+            }
+            if score >= 8:
+                important.append(entry)
+            elif score >= 5:
+                to_read.append(entry)
+            else:
+                skip.append(entry)
+
+        important.sort(key=lambda x: x["score"], reverse=True)
+        to_read.sort(key=lambda x: x["score"], reverse=True)
+
+        result: dict[str, Any] = {
+            "status": "ok",
+            "important": important[:top_n],
+            "to_read": to_read,
+            "skip": skip,
+            "total": len(papers),
+            "summary": f"{len(important[:top_n])} important, {len(to_read)} to_read, {len(skip)} skip",
+        }
+        if not_found:
+            result["not_found"] = not_found
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_citation_trace(
+        paper_id: str,
+        direction: str = "both",
+        max_depth: int = 2,
+        limit_per_level: int = 10,
+    ) -> str:
+        """Recursively trace citations up to max_depth levels in a single call.
+
+        Replaces the multi-round pattern where the AI calls paper_citations
+        repeatedly.  Auto-saves all discovered papers to the local library.
+
+        Args:
+            paper_id: Paper ID (internal, canonical, or arXiv ID).
+            direction: 'references', 'citations', or 'both' (default).
+            max_depth: How many levels deep to trace (default 2, max 3).
+            limit_per_level: Max papers to follow per level (default 10).
+
+        Returns:
+            JSON with seed paper, tree levels, and discovery stats.
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        max_depth = min(max_depth, 3)
+        result = ctx.citation_service.trace(
+            paper.id,
+            direction=direction,
+            max_depth=max_depth,
+            limit_per_level=limit_per_level,
+        )
+
+        if "error" not in result:
+            trace_name = re.sub(r"[^\w\s-]", "", paper.title)[:50].strip().replace(" ", "-")
+            for level in result.get("levels", []):
+                refs = [p for p in level.get("papers", []) if p.get("direction") == "reference"]
+                cites = [p for p in level.get("papers", []) if p.get("direction") == "cited_by"]
+                ctx.workspace_manager.update_citation_trace(
+                    trace_name, paper.id, paper.title, refs, cites,
+                )
+            ctx.workspace_manager.append_journal(
+                f"引用追踪: {paper.title[:50]} (depth={max_depth})",
+                {"paper_id": paper.id, "total_discovered": result.get("total_discovered", 0)},
+            )
+
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_morning_brief(days: int = 1) -> str:
+        """One-call morning pipeline: context recovery + collect + digest + auto-mark.
+
+        Replaces the 3-step AI chain (workspace_context → collect → digest).
+        If the workspace has activity (mode=workspace), top digest picks are
+        automatically marked as 'to_read'.
+
+        Args:
+            days: How many days back to collect (default 1).
+
+        Returns:
+            JSON with workspace context, collection stats, digest, and auto-mark count.
+        """
+        _ensure_workspace()
+
+        ws_context = ctx.workspace_manager.get_context()
+        stats = ws_context.get("reading_stats", {})
+        journal = ws_context.get("journal_recent", [])
+        has_activity = bool(journal) or any(stats.get(k, 0) > 0 for k in ("to_read", "reading", "read", "important"))
+        mode = "workspace" if has_activity else "lightweight"
+
+        # Collect
+        enabled_sources = ctx.source_registry.list_enabled_sources()
+        if enabled_sources:
+            record = ctx.collection_manager.collect_from_sources(
+                sources=enabled_sources, profile=ctx.config,
+                days_back=days, max_results=200,
+            )
+        else:
+            cfg = ctx.config
+            record = ctx.collection_manager.collect_from_arxiv(
+                categories=cfg.sources, days_back=days, max_results=200,
+            )
+
+        collection_info: dict[str, Any] = {
+            "status": record.status,
+            "new": record.new_count,
+            "duplicate": record.duplicate_count,
+        }
+
+        if record.new_count > 0:
+            cfg = ctx.config
+            all_p = ctx.storage.get_all_papers(limit=record.collected_count)
+            unscored = [p for p in all_p if p.lifecycle_state == "discovered"]
+            if unscored:
+                interests = {"topics": cfg.topics, "keywords": cfg.keywords}
+                ctx.filtering_manager.filter_papers(unscored, interests, show_progress=False)
+
+        # Digest
+        digest_data: dict[str, Any] = {}
+        if ctx.storage.count_papers() > 0:
+            digest = ctx.digest_generator.generate_daily_digest(ctx.config)
+            digest_data = digest.to_dict()
+
+        # Auto-mark top picks if workspace mode
+        auto_marked = 0
+        if mode == "workspace" and digest_data.get("high_confidence"):
+            top_ids = [p["id"] for p in digest_data["high_confidence"][:5] if p.get("id")]
+            if top_ids:
+                auto_marked = ctx.storage.update_reading_status(top_ids, "to_read")
+                ctx.workspace_manager.rebuild_reading_list()
+
+        ctx.workspace_manager.append_journal(
+            f"Morning Brief: {record.new_count} new, {auto_marked} auto-marked",
+            {"days": days, "mode": mode},
+        )
+
+        return json.dumps({
+            "status": "ok",
+            "mode": mode,
+            "context": ws_context if mode == "workspace" else None,
+            "collection": collection_info,
+            "digest": digest_data,
+            "auto_marked": auto_marked,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_trend_data(
+        topic: str,
+        years_back: int = 3,
+    ) -> str:
+        """Compute publication trend data for a topic from the local library.
+
+        Groups papers by year and topic tags, computes counts and year-over-year
+        deltas.  Replaces "AI mental arithmetic" for trend analysis.
+
+        Args:
+            topic: Research topic keywords.
+            years_back: How many years to look back (default 3).
+
+        Returns:
+            JSON with year-by-year counts per direction, trend indicators,
+            and top venues.
+        """
+        from collections import defaultdict
+        from datetime import datetime as dt
+
+        current_year = dt.now().year
+        start_year = current_year - years_back
+
+        result = ctx.search_engine.search(topic, limit=1000, diverse=True)
+        all_papers = result.papers
+
+        papers_in_range = [
+            p for p in all_papers
+            if p.published_at and p.published_at.year >= start_year
+        ]
+
+        years = list(range(start_year, current_year + 1))
+
+        by_year: dict[int, int] = defaultdict(int)
+        by_topic_year: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+        venue_counter: Counter = Counter()
+
+        for p in papers_in_range:
+            yr = p.published_at.year
+            by_year[yr] += 1
+            for t in (p.topics or []):
+                by_topic_year[t][yr] += 1
+            meta = p.metadata or {}
+            venue = meta.get("venue") or p.source_name
+            if venue:
+                venue_counter[venue] += 1
+
+        def _trend(counts_by_year: dict[int, int]) -> str:
+            vals = [counts_by_year.get(y, 0) for y in years]
+            if len(vals) < 2:
+                return "stable"
+            recent = vals[-1]
+            prev = vals[-2] if len(vals) >= 2 else 0
+            if prev == 0:
+                return "up" if recent > 0 else "stable"
+            ratio = recent / prev
+            if ratio >= 1.5:
+                return "up"
+            elif ratio <= 0.6:
+                return "down"
+            return "stable"
+
+        directions = []
+        for t in sorted(by_topic_year.keys(), key=lambda k: sum(by_topic_year[k].values()), reverse=True)[:15]:
+            counts = [by_topic_year[t].get(y, 0) for y in years]
+            directions.append({
+                "name": t,
+                "counts_by_year": counts,
+                "total": sum(counts),
+                "trend": _trend(by_topic_year[t]),
+            })
+
+        overall_counts = [by_year.get(y, 0) for y in years]
+
+        return json.dumps({
+            "status": "ok",
+            "topic": topic,
+            "years": years,
+            "overall_counts": overall_counts,
+            "overall_trend": _trend(by_year),
+            "directions": directions,
+            "total_papers": len(papers_in_range),
+            "top_venues": [{"name": v, "count": c} for v, c in venue_counter.most_common(10)],
+        }, ensure_ascii=False, default=str)
+
+    # ── v04: Deep Understanding Tools ─────────────────────────────────
+
+    @mcp.tool()
+    def paper_parse(paper_id: str, pdf_path: str | None = None) -> str:
+        """Parse a downloaded PDF into structured sections, tables, and figures.
+
+        If pdf_path is not provided, searches common download locations.
+
+        Args:
+            paper_id: Paper ID (internal, canonical, or arXiv ID).
+            pdf_path: Optional explicit path to the PDF file.
+
+        Returns:
+            JSON with parsed sections summary, table count, and figure captions.
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        from pathlib import Path as _Path
+
+        if pdf_path:
+            path = _Path(pdf_path)
+        else:
+            path = ctx.pdf_processor.find_pdf_for_paper(paper.id)
+
+        if not path or not path.exists():
+            return json.dumps({
+                "error": "PDF not found. Download it first with paper_download, or provide pdf_path.",
+                "paper_id": paper.id,
+            })
+
+        content = ctx.pdf_processor.parse_and_store(paper.id, path)
+        return json.dumps({
+            "status": "ok",
+            "paper_id": paper.id,
+            **content.to_summary_dict(),
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_ask(paper_id: str, question: str) -> str:
+        """Ask a question about a paper using its full text.
+
+        Requires the paper to be parsed first (via paper_parse).
+        Routes the question to relevant sections for focused answers.
+
+        Args:
+            paper_id: Paper ID.
+            question: Question about the paper (e.g. "What loss function is used?").
+
+        Returns:
+            JSON with the answer and source sections.
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        content = ctx.pdf_processor.get_content(paper.id)
+        if not content:
+            return json.dumps({
+                "error": "Paper not parsed yet. Run paper_parse first.",
+                "paper_id": paper.id,
+            })
+
+        relevant_sections = []
+        for s in content.sections:
+            if s.name in ("references", "acknowledgments"):
+                continue
+            relevant_sections.append(s)
+
+        sections_text = "\n\n".join(
+            f"## {s.heading}\n{s.text}" for s in relevant_sections
+        )
+
+        answer = ctx.llm.answer_from_content(sections_text, question)
+        return json.dumps({
+            "status": "ok",
+            "paper_id": paper.id,
+            "question": question,
+            "answer": answer,
+            "sections_used": [s.name for s in relevant_sections],
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_sections(paper_id: str) -> str:
+        """List parsed sections of a paper with headings and page ranges.
+
+        Args:
+            paper_id: Paper ID.
+
+        Returns:
+            JSON with section list.
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        content = ctx.pdf_processor.get_content(paper.id)
+        if not content:
+            return json.dumps({"error": "Paper not parsed yet. Run paper_parse first."})
+
+        return json.dumps({
+            "status": "ok",
+            "paper_id": paper.id,
+            **content.to_summary_dict(),
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_tables(paper_id: str) -> str:
+        """Return all extracted tables from a parsed paper.
+
+        Args:
+            paper_id: Paper ID.
+
+        Returns:
+            JSON with structured table data (headers, rows, captions).
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        content = ctx.pdf_processor.get_content(paper.id)
+        if not content:
+            return json.dumps({"error": "Paper not parsed yet. Run paper_parse first."})
+
+        tables_data = [
+            {
+                "caption": t.caption,
+                "headers": t.headers,
+                "rows": t.rows,
+                "section": t.section,
+            }
+            for t in content.tables
+        ]
+        return json.dumps({
+            "status": "ok",
+            "paper_id": paper.id,
+            "table_count": len(tables_data),
+            "tables": tables_data,
+        }, ensure_ascii=False, default=str)
+
+    # ── v04: Structured Extraction Tools ──
+
+    @mcp.tool()
+    def paper_extract(paper_id: str, force: bool = False) -> str:
+        """Extract a structured profile from a paper (task, method, datasets, etc.).
+
+        Uses full text if the paper has been parsed, otherwise uses abstract only.
+
+        Args:
+            paper_id: Paper ID.
+            force: If True, re-extract even if a profile exists.
+
+        Returns:
+            JSON with the structured profile.
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        content = ctx.pdf_processor.get_content(paper.id)
+        profile = ctx.extraction_engine.extract_profile(paper, content, force=force)
+
+        return json.dumps({
+            "status": "ok",
+            **profile.to_dict(),
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_compare_table(paper_ids: list[str]) -> str:
+        """Generate a structured comparison table from paper profiles.
+
+        Returns actual structured data (not LLM prose). Papers must have
+        profiles extracted first via paper_extract.
+
+        Args:
+            paper_ids: List of paper IDs to compare.
+
+        Returns:
+            JSON with headers and rows for a comparison table.
+        """
+        if len(paper_ids) < 2:
+            return json.dumps({"error": "Need at least 2 papers to compare."})
+
+        resolved_ids: list[str] = []
+        not_found: list[str] = []
+        for pid in paper_ids:
+            p = _resolve_paper(pid)
+            if p:
+                resolved_ids.append(p.id)
+            else:
+                not_found.append(pid)
+
+        result = ctx.extraction_engine.build_comparison_table(resolved_ids)
+        if not_found:
+            result["not_found_ids"] = not_found
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_query(
+        task: str = "",
+        method: str = "",
+        dataset: str = "",
+        venue: str = "",
+    ) -> str:
+        """Query across structured paper profiles.
+
+        Filter papers by task, method, dataset, or venue using extracted profiles.
+
+        Args:
+            task: Filter by task (e.g. "placement").
+            method: Filter by method family (e.g. "reinforcement learning").
+            dataset: Filter by dataset (e.g. "ISPD").
+            venue: Filter by venue (e.g. "DAC").
+
+        Returns:
+            JSON with matching paper profiles.
+        """
+        filters: dict[str, str] = {}
+        if task:
+            filters["task"] = task
+        if method:
+            filters["method_family"] = method
+        if dataset:
+            filters["datasets"] = dataset
+        if venue:
+            filters["venue"] = venue
+
+        if not filters:
+            return json.dumps({"error": "Provide at least one filter (task, method, dataset, venue)."})
+
+        profiles = ctx.extraction_engine.query_profiles(filters)
+        return json.dumps({
+            "status": "ok",
+            "count": len(profiles),
+            "filters": filters,
+            "profiles": [p.to_dict() for p in profiles],
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_field_stats(field: str) -> str:
+        """Show aggregate statistics for a profile field.
+
+        Args:
+            field: Field name — "task", "method_family", "venue", "datasets",
+                   "baselines", or "metrics".
+
+        Returns:
+            JSON with value counts for the field.
+        """
+        valid = {"task", "method_family", "method_name", "venue", "datasets", "baselines", "metrics"}
+        if field not in valid:
+            return json.dumps({"error": f"Invalid field. Use: {sorted(valid)}"})
+
+        stats = ctx.extraction_engine.field_stats(field)
+        return json.dumps({
+            "status": "ok",
+            "field": field,
+            "distribution": stats,
+            "unique_values": len(stats),
+        }, ensure_ascii=False, default=str)
+
+    # ── v04: Research Question Engine ──
+
+    @mcp.tool()
+    def paper_research(question: str, limit: int = 20) -> str:
+        """Answer a research question by decomposing it into search strategies.
+
+        Decomposes the question, runs multi-query search, aggregates evidence,
+        and synthesizes an answer with citations.
+
+        Args:
+            question: Research question (e.g. "Is RL for placement still novel?").
+            limit: Max papers to consider (default 20).
+
+        Returns:
+            JSON with search plan, evidence papers, and synthesized answer.
+        """
+        result = ctx.research_engine.research(question, limit=limit)
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    # ── v04: Research-Aware Recommendation ──
+
+    @mcp.tool()
+    def paper_set_context(
+        project: str = "",
+        baseline: str = "",
+        questions: list[str] | None = None,
+        reading_group: str = "",
+    ) -> str:
+        """Set the current research context for context-aware recommendations.
+
+        Args:
+            project: Current project description (e.g. "GNN-based routing optimization").
+            baseline: Current baseline method (e.g. "GCN + A* hybrid").
+            questions: Current open research questions.
+            reading_group: Name of the active reading group.
+
+        Returns:
+            JSON with the saved research context.
+        """
+        context = {
+            "current_project": project,
+            "current_baseline": baseline,
+            "current_questions": questions or [],
+            "active_reading_group": reading_group,
+        }
+        ctx.storage.save_research_context(context)
+
+        if "research_planner" in ctx.__dict__:
+            del ctx.__dict__["research_planner"]
+
+        return json.dumps({
+            "status": "ok",
+            "context": context,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_recommend(n: int = 5) -> str:
+        """Get context-aware paper recommendations with structured explanations.
+
+        Uses the current research context (set via paper_set_context) to
+        provide recommendations that explain relevance to your specific work.
+
+        Args:
+            n: Number of recommendations (default 5).
+
+        Returns:
+            JSON with recommended papers and detailed relevance explanations.
+        """
+        research_ctx = ctx.storage.get_research_context()
+        if not research_ctx or not research_ctx.get("current_project"):
+            return json.dumps({
+                "error": "No research context set. Use paper_set_context first.",
+                "hint": "Set your current project, baseline, and questions.",
+            })
+
+        papers = ctx.storage.get_filtered_papers(min_score=5.0, limit=50)
+        if not papers:
+            return json.dumps({"error": "No scored papers. Run paper_collect first."})
+
+        reading_group = research_ctx.get("active_reading_group", "")
+        reading_titles: list[str] = []
+        if reading_group:
+            group_papers = ctx.storage.get_group_papers(reading_group, limit=30)
+            reading_titles = [p.title for p in group_papers]
+
+        recommendations: list[dict[str, Any]] = []
+        for paper in papers[:n * 2]:
+            explanation = ctx.llm.explain_relevance(
+                paper, research_ctx, reading_titles or None
+            )
+            recommendations.append({
+                "id": paper.id,
+                "title": paper.title,
+                "score": round(paper.relevance_score, 1),
+                "explanation": explanation,
+            })
+            if len(recommendations) >= n:
+                break
+
+        return json.dumps({
+            "status": "ok",
+            "context": research_ctx,
+            "count": len(recommendations),
+            "recommendations": recommendations,
+        }, ensure_ascii=False, default=str)
+
+    # ── v05: Feedback Learning ──
+
+    @mcp.tool()
+    def paper_feedback(paper_id: str, feedback_type: str, value: str) -> str:
+        """Record feedback on a paper or recommendation.
+
+        Use this to teach the system your preferences over time.
+
+        Args:
+            paper_id: Paper ID.
+            feedback_type: Type of feedback:
+                - "relevance_override": value is "too_high" | "too_low" | "just_right"
+                - "topic_preference": value is "more:topic_name" or "less:topic_name"
+                - "skip_reason": value is free text
+                - "highlight": value is free text explaining importance
+            value: The feedback value (see above).
+
+        Returns:
+            JSON with feedback confirmation.
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        result = ctx.feedback_manager.record_feedback(paper.id, feedback_type, value)
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_preferences() -> str:
+        """View learned preferences from accumulated feedback.
+
+        Returns:
+            JSON with topic adjustments, relevance bias, and feedback summary.
+        """
+        summary = ctx.feedback_manager.get_feedback_summary()
+        return json.dumps({
+            "status": "ok",
+            **summary,
+        }, ensure_ascii=False, default=str)
+
+    # ── v05: Watchlist / Long-term Tracking ──
+
+    @mcp.tool()
+    def paper_watch(watch_type: str, watch_value: str, description: str = "") -> str:
+        """Add a watchlist item for long-term tracking.
+
+        Args:
+            watch_type: What to track — "topic", "author", "venue",
+                        "method_line", or "forward_citations".
+            watch_value: The value to track (topic name, author name, paper_id for citations).
+            description: Optional description.
+
+        Returns:
+            JSON with the created watch item.
+        """
+        result = ctx.watchlist_manager.add_watch(watch_type, watch_value, description)
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_watch_list() -> str:
+        """List all watchlist items.
+
+        Returns:
+            JSON with all watch items.
+        """
+        items = ctx.watchlist_manager.list_watches()
+        return json.dumps({
+            "status": "ok",
+            "count": len(items),
+            "items": items,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_watch_check(watch_id: str | None = None) -> str:
+        """Check for new papers matching watchlist criteria.
+
+        Args:
+            watch_id: Optional specific watch item to check. If None, checks all.
+
+        Returns:
+            JSON with update results per watch item.
+        """
+        result = ctx.watchlist_manager.check_updates(watch_id)
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_watch_digest() -> str:
+        """Generate a digest of all watchlist updates.
+
+        Returns:
+            JSON with a summary of new papers matching each watch item.
+        """
+        result = ctx.watchlist_manager.generate_digest()
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    # ── v05: Credibility Assessment ──
+
+    @mcp.tool()
+    def paper_credibility(paper_id: str) -> str:
+        """Assess the credibility and reproducibility of a paper.
+
+        Checks code availability, venue quality, citation metrics,
+        claim aggressiveness, baseline completeness, and reproducibility risk.
+
+        Args:
+            paper_id: Paper ID.
+
+        Returns:
+            JSON with credibility assessment and read priority suggestion.
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        content = ctx.pdf_processor.get_content(paper.id)
+        assessment = ctx.credibility_assessor.assess(paper, content)
+
+        result = assessment.to_dict()
+        result["read_priority"] = assessment.read_priority
+        result["title"] = paper.title
+        return json.dumps({
+            "status": "ok",
+            **result,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_credibility_batch(paper_ids: list[str]) -> str:
+        """Batch credibility assessment for multiple papers.
+
+        Args:
+            paper_ids: List of paper IDs.
+
+        Returns:
+            JSON with credibility assessments for each paper.
+        """
+        found, not_found = _resolve_papers(paper_ids)
+        if not found:
+            return json.dumps({"error": "No papers found.", "not_found": not_found})
+
+        assessments = ctx.credibility_assessor.assess_batch(found)
+        return json.dumps({
+            "status": "ok",
+            "count": len(assessments),
+            "assessments": [
+                {**a.to_dict(), "read_priority": a.read_priority}
+                for a in assessments
+            ],
+            "not_found": not_found,
+        }, ensure_ascii=False, default=str)
+
+    # ── v06: Research Planning ──
+
+    @mcp.tool()
+    def paper_ideate(paper_ids: list[str]) -> str:
+        """Generate research ideas inspired by the given papers.
+
+        Contextualizes ideas to your current research project (set via paper_set_context).
+
+        Args:
+            paper_ids: List of paper IDs to draw inspiration from.
+
+        Returns:
+            JSON with generated research ideas.
+        """
+        resolved_ids: list[str] = []
+        for pid in paper_ids:
+            p = _resolve_paper(pid)
+            if p:
+                resolved_ids.append(p.id)
+
+        if not resolved_ids:
+            return json.dumps({"error": "No papers found."})
+
+        result = ctx.research_planner.ideate(resolved_ids)
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_experiment_plan(paper_id: str) -> str:
+        """Analyze what's reproducible, improvable, and replaceable in a paper.
+
+        Args:
+            paper_id: Paper ID.
+
+        Returns:
+            JSON with experiment plan (reproduce / improve / replace suggestions).
+        """
+        paper = _resolve_paper(paper_id)
+        if not paper:
+            return json.dumps({"error": f"Paper not found: {paper_id}"})
+
+        result = ctx.research_planner.experiment_plan(paper.id)
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_reading_pack(question: str, limit: int = 10) -> str:
+        """Auto-organize a reading pack for a research question.
+
+        Finds relevant papers and organizes them into a structured reading plan
+        with suggested order, rationale, and read depth for each.
+
+        Args:
+            question: Research question to build a reading pack for.
+            limit: Max papers in the pack (default 10).
+
+        Returns:
+            JSON with ordered reading pack and plan.
+        """
+        result = ctx.research_planner.reading_pack(question, limit=limit)
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    # ── Health Check (in-IDE diagnostics) ──────────────────────────────
+
+    @mcp.tool()
+    def paper_health() -> str:
+        """Run a health check on paper-agent setup. Verifies LLM config, research
+        profile, paper library, and workspace. Use this when something seems broken
+        or when the user asks to diagnose their setup.
+
+        Returns:
+            JSON with per-check pass/fail results and fix suggestions.
+        """
+        import shutil
+        import sys as _sys
+
+        checks: list[dict[str, Any]] = []
+
+        # 1. LLM config
+        try:
+            from paper_agent.app.config_manager import ConfigManager
+            cm = ConfigManager(None)
+            if cm.is_initialized():
+                checks.append({"name": "llm_config", "pass": True, "detail": "已初始化"})
+            else:
+                checks.append({"name": "llm_config", "pass": False,
+                                "detail": "未初始化",
+                                "fix": "在终端运行 paper-agent init"})
+        except Exception as e:
+            checks.append({"name": "llm_config", "pass": False,
+                            "detail": str(e),
+                            "fix": "在终端运行 paper-agent init"})
+
+        # 2. MCP executable
+        mcp_bin = shutil.which("paper-agent-mcp")
+        if mcp_bin:
+            checks.append({"name": "mcp_binary", "pass": True, "detail": mcp_bin})
+        else:
+            venv_bin = Path(_sys.executable).parent / "paper-agent-mcp"
+            checks.append({"name": "mcp_binary", "pass": True,
+                            "detail": str(venv_bin) if venv_bin.exists()
+                            else f"{_sys.executable} -m paper_agent.mcp (fallback)"})
+
+        # 3. Research profile
+        try:
+            cfg = ctx.require_initialized()
+            if cfg.topics:
+                checks.append({"name": "profile", "pass": True,
+                                "detail": f"{len(cfg.topics)} topics, {len(cfg.keywords)} keywords"})
+            else:
+                checks.append({"name": "profile", "pass": False,
+                                "detail": "未配置研究方向",
+                                "fix": "告诉我你的研究方向，或运行 /paper-setup"})
+        except Exception:
+            checks.append({"name": "profile", "pass": False,
+                            "detail": "需要先完成 init",
+                            "fix": "在终端运行 paper-agent init"})
+
+        # 4. Paper library
+        try:
+            total = ctx.storage.count_papers()
+            if total > 0:
+                checks.append({"name": "library", "pass": True, "detail": f"{total} 篇论文"})
+            else:
+                checks.append({"name": "library", "pass": False,
+                                "detail": "论文库为空",
+                                "fix": "运行 /start-my-day 或 /paper-collect 采集论文"})
+        except Exception:
+            checks.append({"name": "library", "pass": False,
+                            "detail": "无法连接论文库",
+                            "fix": "检查数据库配置"})
+
+        # 5. Workspace
+        try:
+            ws_status = ctx.workspace_manager.status()
+            checks.append({"name": "workspace", "pass": True,
+                            "detail": f"已初始化 — {ws_status.get('total_notes', 0)} 笔记"})
+        except Exception:
+            checks.append({"name": "workspace", "pass": False,
+                            "detail": "工作区未初始化",
+                            "fix": "运行 paper-agent setup claude-code 或 paper-agent setup cursor"})
+
+        all_ok = all(c["pass"] for c in checks)
+        suggestion = None
+        if not all_ok:
+            failed = [c for c in checks if not c["pass"]]
+            suggestion = "需要修复: " + "; ".join(
+                f"{c['name']} — {c.get('fix', c['detail'])}" for c in failed
+            )
+
+        return json.dumps({
+            "status": "ok" if all_ok else "issues_found",
+            "checks": checks,
+            "suggestion": suggestion,
+        }, ensure_ascii=False, default=str)

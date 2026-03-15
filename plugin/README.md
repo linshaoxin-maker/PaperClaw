@@ -27,16 +27,17 @@ plugin/
     │   └── plugin.json              ← 插件清单
     ├── .mcp.json                    ← MCP 服务器配置模板
     ├── commands/                    ← Slash 命令定义
-    │   ├── start-my-day.md          ← /start-my-day（daily-reading 工作流）
+    │   ├── paper.md                 ← /paper (统一主入口，智能路由)
+    │   ├── start-my-day.md          ← /start-my-day (one-call morning pipeline)
     │   ├── paper-search.md          ← /paper-search
     │   ├── paper-collect.md         ← /paper-collect
-    │   ├── paper-analyze.md         ← /paper-analyze（deep-dive 工作流）
+    │   ├── paper-analyze.md         ← /paper-analyze
     │   ├── paper-compare.md         ← /paper-compare
-    │   ├── paper-survey.md          ← /paper-survey（literature-survey 工作流）
+    │   ├── paper-survey.md          ← /paper-survey (quick-first)
     │   ├── paper-download.md        ← /paper-download
-    │   ├── paper-triage.md          ← /paper-triage（paper-triage 工作流）
-    │   ├── paper-insight.md         ← /paper-insight（research-insight 工作流）
-    │   └── paper-setup.md           ← /paper-setup
+    │   ├── paper-setup.md           ← /paper-setup
+    │   ├── paper-triage.md          ← /paper-triage (auto-classify)
+    │   └── paper-insight.md         ← /paper-insight (trend analysis)
     └── skills/                      ← 工作流 Skills（AI 行为编排）
         ├── paper-intelligence/      ← 路由 Skill：根据意图分发到具体工作流
         │   └── SKILL.md
@@ -62,60 +63,45 @@ plugin/
 
 ## 工作流 Skills
 
-Skills 是预编排的研究工作流，AI 会在关键节点与用户交互，最终产出结构化交付件。
+Skills 是预编排的研究工作流，设计原则：**fork-only checkpoint**（只在分叉决策点暂停，结果前最多 2 轮确认），**quick-first**（默认轻量模式），**auto-save deliverables**（每个工作流自动保存输出件到 `.paper-agent/` 对应目录，并告知用户路径），**表格 + 结论**（论文列表用表格，每个输出以「结论与建议」结尾）。
 
-| Skill | 触发词 | 交付件 | 默认路径 |
-|-------|--------|--------|---------|
-| **daily-reading** | "每日开工"、"start my day" | 每日阅读摘要 | `daily/{date}.md` |
-| **deep-dive** | "分析这篇"、"展开讲讲" | 论文分析笔记 | `.paper-agent/notes/{id}.md` |
-| **literature-survey** | "综述"、"survey" | 综述报告 + BibTeX | `survey/{topic}.md` |
-| **citation-explore** | "引用链"、"citations" | 引用图谱报告 | `.paper-agent/citation-traces/{name}.md` |
-| **paper-triage** | "帮我筛一下"、"哪些值得读" | 筛选决策表 | `triage/{topic}-{date}.md` |
-| **research-insight** | "趋势"、"洞察" | 趋势洞察报告 | `insight/{topic}-{date}.md` |
+| Skill | 触发词 | 后端工具 | checkpoint 数 |
+|-------|--------|---------|--------------|
+| **daily-reading** | "start my day" | `paper_morning_brief` | 1 |
+| **deep-dive** | "分析这篇" | `paper_show` + `paper_note_add(mark_as=)` | 2 |
+| **literature-survey** | "综述"、"survey" | `paper_quick_scan` | 2 |
+| **citation-explore** | "引用链" | `paper_citation_trace` | 1 |
+| **paper-triage** | "筛一下" | `paper_auto_triage` | 2 |
+| **research-insight** | "趋势" | `paper_quick_scan` + `paper_trend_data` | 1 |
 
-每个 Skill 都有：交互检查点（🗣️ 必须问用户）、交付件模板、Skill 间跳转。
-
-### Skills 触发机制
-
-#### Cursor
-
-`paper-agent setup cursor` 安装 7 个 Skill 目录到 `.cursor/skills/`：
-
-| 目录 | 匹配关键词 |
-|------|-----------|
-| `paper-agent/` | 路由 Skill（将意图分发到下方具体 Skill） |
-| `paper-agent-daily-reading/` | "start my day"、"每日开工" |
-| `paper-agent-deep-dive/` | "分析这篇"、"展开讲讲"、arXiv ID |
-| `paper-agent-survey/` | "综述"、"survey"、"这个方向有哪些工作" |
-| `paper-agent-citation/` | "引用链"、"citations"、"谁引用了它" |
-| `paper-agent-triage/` | "帮我筛一下"、"哪些值得读" |
-| `paper-agent-insight/` | "趋势"、"洞察"、"什么方法在兴起" |
-
-Cursor Agent 根据 SKILL.md 的 `description` 自动匹配用户意图到对应 Skill。
-
-#### Claude Code
-
-两种触发方式：
-
-1. **Slash 命令**（精确触发）：`/start-my-day`、`/paper-analyze`、`/paper-survey`、`/paper-triage`、`/paper-insight`
-2. **自然语言**（CLAUDE.md 路由）：CLAUDE.md 中的 "Workflow Skills" 表定义路由规则，Claude Code 自动识别意图
-
-每个 Slash 命令的 `.md` 文件中嵌入了完整的 Phase 定义和交互检查点，确保 AI 在关键节点与用户交互。
+v03 将多步 AI 链下沉为单次后端工具调用，总 checkpoint 从 ~23 降至 ~9。v07 新增 `paper_save_report` 工具，每个 workflow 自动保存输出件。
 
 ## 命令速查
 
 | 命令 | 功能 | 示例 |
 |------|------|------|
-| `/start-my-day` | 每日论文推荐 | `/start-my-day` |
-| `/paper-search` | 搜索论文（本地 + 在线，支持关键词扩展） | `/paper-search GNN placement` |
-| `/paper-collect` | 从 arXiv + DBLP + Semantic Scholar 并行采集 | `/paper-collect` |
-| `/paper-analyze` | 单篇论文深度分析 | `/paper-analyze 2301.12345` |
-| `/paper-compare` | 多篇论文对比表格 | `/paper-compare 2301.12345,2302.54321` |
-| `/paper-survey` | 生成文献综述（支持多方向批量搜索） | `/paper-survey GNN for EDA` |
-| `/paper-download` | 批量下载 PDF 文件 | `/paper-download 2301.12345,2302.54321` |
-| `/paper-triage` | 论文筛选分流（批量评估→分类→标记） | `/paper-triage` |
-| `/paper-insight` | 研究趋势洞察（方法演进→热门主题→研究空白） | `/paper-insight AI for EDA` |
+| **`/paper`** | **统一主入口** — 展示功能菜单，智能路由 | `/paper` |
+| `/start-my-day` | 每日推荐（one-call: context+collect+digest+mark） | `/start-my-day` |
+| `/paper-search` | 搜索论文 | `/paper-search GNN placement` |
+| `/paper-collect` | 三源并行采集 | `/paper-collect` |
+| `/paper-analyze` | 单篇深度分析 + 自动存笔记 | `/paper-analyze 2301.12345` |
+| `/paper-compare` | 多篇对比 | `/paper-compare 2301.12345,2302.54321` |
+| `/paper-survey` | 文献综述（quick-first） | `/paper-survey GNN for EDA` |
+| `/paper-download` | 下载 PDF | `/paper-download 2301.12345` |
 | `/paper-setup` | 初始化研究方向 | `/paper-setup` |
+| `/paper-triage` | 批量筛选（auto-classify） | `/paper-triage` |
+| `/paper-insight` | 趋势分析（trend data） | `/paper-insight GNN placement` |
+
+不知道用哪个？输入 `/paper` 让 AI 帮你选。
+
+## 输出格式
+
+所有 workflow 遵循统一输出规范：
+
+- **表格优先**: 论文列表一律使用表格（| # | 标题 | 评分 | 关键词 | 一句话 |），不使用 bullet list
+- **结论必出**: 每个 workflow 输出在 FORK 选项之前包含「结论与建议」段，告诉研究员数据意味着什么
+- **自动保存**: 每个 workflow 完成后自动调用 `paper_save_report` 保存输出件，并告知用户文件路径
+- **后续选项**: FORK 中提供进一步操作（深入分析、导出 BibTeX、写综述等），不再问"要保存吗"
 
 ## MCP 工具一览
 
@@ -142,21 +128,33 @@ Cursor Agent 根据 SKILL.md 的 `description` 自动匹配用户意图到对应
 | `paper_batch_show(paper_ids, detail)` | 批量查看（默认 compact 精简输出，`detail=True` 全量） |
 | `paper_compare(paper_ids, aspects)` | 结构化对比数据 |
 
-### Workspace（v02 新增）
+### Workspace（v02）
 
 | 工具 | 说明 |
 |------|------|
-| `paper_workspace_status()` | 展示 Workspace 仪表盘（阅读进度、分组、笔记、活动），同时更新 `.paper-agent/README.md` |
-| `paper_workspace_context()` | 返回研究上下文摘要，用于新会话恢复（AI 读此知道你之前在干什么） |
-| `paper_reading_status(paper_ids, status)` | 设置阅读状态：`to_read` / `reading` / `read` / `important`，自动更新 reading-list.md |
-| `paper_reading_stats()` | 查看阅读进度统计（各状态计数 + 最近论文） |
-| `paper_note_add(paper_id, content)` | 添加笔记（用户手写或 AI 分析），自动同步到 `notes/{id}.md` |
-| `paper_note_show(paper_id)` | 查看某篇论文的所有笔记 |
-| `paper_group_create(name, description)` | 创建命名的论文分组，自动生成 `collections/{name}.md` |
-| `paper_group_add(name, paper_ids)` | 向分组添加论文 |
-| `paper_group_show(name)` | 查看分组内论文列表 |
-| `paper_group_list()` | 列出所有分组及论文数 |
-| `paper_citations(paper_id, direction)` | 通过 Semantic Scholar 查询引用/被引用关系，新论文自动入库，结果保存到 citation-traces/ |
+| `paper_workspace_status()` | 展示 Workspace 仪表盘 |
+| `paper_workspace_context()` | 返回研究上下文 + `mode` 字段 ("workspace"/"lightweight") |
+| `paper_reading_status(paper_ids, status)` | 设置阅读状态 |
+| `paper_note_add(paper_id, content, mark_as)` | 添加笔记，可选同时标记状态 |
+| `paper_group_add(name, paper_ids, create_if_missing)` | 向分组添加论文，可选自动建组 |
+| `paper_citations(paper_id, direction)` | 单层引用查询 |
+
+### 能力下沉工具（v03 新增）
+
+| 工具 | 替代什么 | 说明 |
+|------|---------|------|
+| `paper_quick_scan(topic, limit)` | 3 步 AI 链 | 本地+在线搜索、去重、排序，一次调用 |
+| `paper_auto_triage(paper_ids, top_n)` | AI 逐篇分析 | 基于已有评分自动三档分流 |
+| `paper_citation_trace(paper_id, max_depth)` | 多轮递归 | 递归引用追踪，最多 3 层 |
+| `paper_morning_brief(days)` | 3 次调用链 | context + collect + digest + auto-mark |
+| `paper_trend_data(topic, years_back)` | AI 脑算 | 按年×方向统计论文数和趋势 |
+
+### 报告输出（v07 新增）
+
+| 工具 | 说明 |
+|------|------|
+| `paper_save_report(report_type, content, filename)` | 保存结构化报告到 `.paper-agent/` 对应子目录（支持 11 种类型），每个 workflow 自动调用 |
+| `paper_list_reports(report_type)` | 列出已保存的报告，可按类型筛选 |
 
 ### 导出与下载
 
@@ -177,21 +175,55 @@ Cursor Agent 根据 SKILL.md 的 `description` 自动匹配用户意图到对应
 ├── collections/                ← 论文分组
 │   ├── _index.md               ← 分组索引
 │   └── rl-placement.md         ← 每个分组一个文件
-├── notes/                      ← 论文笔记
+├── notes/                      ← 深度分析笔记（paper_analyze 自动保存）
 │   └── {paper_id}.md           ← 每篇论文一个文件
-└── citation-traces/            ← 引用链追踪
-    └── {trace_name}.md         ← 每次追踪一个文件
+├── citation-traces/            ← 引用链追踪
+│   └── {trace_name}.md         ← 每次追踪一个文件
+├── daily/                      ← 每日摘要（start-my-day 自动保存）
+│   └── {YYYY-MM-DD}.md
+├── triage/                     ← 筛选报告（paper-triage 自动保存）
+│   └── {topic}-{YYYY-MM-DD}.md
+├── survey/                     ← 文献综述（paper-survey 自动保存）
+│   └── {topic}.md
+├── insight/                    ← 趋势洞察（paper-insight 自动保存）
+│   └── {topic}-{YYYY-MM-DD}.md
+├── compare/                    ← 对比分析（paper-compare 自动保存）
+│   └── {title}-{YYYY-MM-DD}.md
+├── reading-packs/              ← 阅读包（reading_pack 保存）
+│   └── {question}.md
+├── ideas/                      ← 研究 Ideas（paper_ideate 自动保存）
+│   └── {topic}-ideas-{YYYY-MM-DD}.md
+├── experiment-plans/           ← 实验计划（paper_experiment_plan 自动保存）
+│   └── {paper_id}-plan.md
+└── search-results/             ← 搜索结果列表（用户选择保存时）
+    └── {query}-{YYYY-MM-DD}.md
 ```
 
 > 所有文件都是标准 markdown，可以直接在 IDE 中打开查看、编辑。
 > 数据库是真相源，文件是"投影"——丢失可通过 MCP 工具自动重建。
 > `.paper-agent/README.md` 是自动生成的仪表盘，随操作实时更新。
+> 使用 `paper_list_reports()` 可查看所有已保存的报告。
+
+## `paper-agent setup` 安装产物
+
+`paper-agent setup claude-code` 在项目目录中写入：
+
+| 产物 | 说明 |
+|------|------|
+| `.mcp.json` | MCP 服务器配置 |
+| `CLAUDE.md` | AI 行为指令（工具列表 + 交互规则 + 输出格式 + 首次检测） |
+| `.claude/commands/*.md` | 11 个 slash 命令（含 `/paper` 主入口） |
+| `.claude/skills/*.md` | 7 个 workflow skill（路由 + 6 个工作流） |
+| `.paper-agent/` | 研究工作区（笔记、分组、日志、仪表盘） |
+
+安装后运行 `paper-agent doctor` 验证完整性。
 
 ## 这个目录 vs `paper-agent setup`
 
 | | `paper-agent setup` | `plugin/` 目录 |
 |---|---|---|
 | **用途** | 终端用户一键配置 IDE | 开发者维护插件分发物料 |
+| **安装内容** | commands + skills + CLAUDE.md + workspace | 同左（物料源） |
 | **方式** | 自动写入配置文件 | 手动或通过 marketplace 安装 |
 | **推荐** | ✅ 推荐所有用户使用 | 仅 marketplace 发布需要 |
 

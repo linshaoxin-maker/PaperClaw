@@ -1,0 +1,53 @@
+---
+description: Auto-activate paper-agent MCP tools when user mentions papers, arXiv, research digests, or uses paper-related keywords.
+globs:
+alwaysApply: false
+---
+
+# Paper Agent Rule
+
+当检测到以下场景时，自动激活 paper-agent MCP 工具：
+
+## 触发条件
+
+### 日常推荐
+- 用户说 "start my day" 或 "今日推荐" → `paper_collect(days=1)` + `paper_digest()`
+
+### 搜索
+- 用户说 "搜索论文" / "paper search" + 关键词 → `paper_search(query)`
+- 结果少时建议用户使用 `paper_search(query, diverse=True)` 扩展关键词
+- 本地不够时建议 `paper_search_online(query)` 在线搜索
+
+### 采集
+- 用户说 "收集论文" / "paper collect" → `paper_collect()`
+
+### 单篇分析
+- 用户说 "分析论文" / "paper-analyze" + ID → `paper_show(paper_id)` 并生成分析笔记
+- 用户提到 arXiv ID 格式（如 `2301.12345`）→ `paper_show()`
+
+### 多篇对比
+- 用户说 "对比论文" / "论文比较" / "paper compare" → `paper_batch_show(ids)` + `paper_compare(ids, aspects)`
+- 用户说 "这几篇有什么区别" / "比一下方法" → 同上
+
+### 文献综述
+- 用户说 "写综述" / "literature survey" / "paper survey" → 触发 Survey 工作流
+- 用户说 "这个方向有哪些工作" / "梳理一下研究现状" → 同上
+- 可用 `paper_survey_collect(keywords, venues)` 采集多年论文，再用 `paper_batch_show` + `paper_compare` 生成综述
+
+### 下载
+- 用户说 "下载论文" / "paper download" → `paper_download(paper_ids)`
+- 用户说 "帮我下这篇 PDF" → 同上
+
+### 导出
+- 用户说 "导出 BibTeX" / "export" → `paper_export(paper_ids, format)`
+
+### 编码上下文
+- 用户在 AI/ML 代码中提到方法名（transformer, attention, BERT, LoRA, GNN 等）→ 建议搜索相关论文
+
+## 行为规范
+
+- 所有论文分析和摘要使用中文输出
+- 论文标题使用 `[[论文标题]]` wikilink 格式
+- 搜索结果保持精简，深度分析才展开全部内容
+- 如果 paper-agent 未初始化，引导用户运行 `paper-agent init`
+- 搜索结果少时主动提示：可以尝试 `diverse=True` 扩展关键词，或在线搜索

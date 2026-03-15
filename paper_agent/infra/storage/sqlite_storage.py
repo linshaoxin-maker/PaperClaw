@@ -12,7 +12,7 @@ from paper_agent.domain.models.paper import Paper
 from paper_agent.domain.models.digest import Digest, DigestStats
 from paper_agent.domain.models.collection import CollectionRecord
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -190,6 +190,92 @@ CREATE TABLE IF NOT EXISTS paper_group_items (
 );
 """
 
+_V3_MIGRATION_SQL = """
+-- v03: paper contents (PDF full-text parsing)
+CREATE TABLE IF NOT EXISTS paper_contents (
+    paper_id TEXT PRIMARY KEY,
+    sections_json TEXT NOT NULL DEFAULT '[]',
+    tables_json TEXT NOT NULL DEFAULT '[]',
+    figure_captions_json TEXT NOT NULL DEFAULT '[]',
+    raw_text TEXT NOT NULL DEFAULT '',
+    parsed_at TEXT NOT NULL,
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+
+-- v03: paper profiles (structured extraction)
+CREATE TABLE IF NOT EXISTS paper_profiles (
+    paper_id TEXT PRIMARY KEY,
+    task TEXT NOT NULL DEFAULT '',
+    method_family TEXT NOT NULL DEFAULT '',
+    method_name TEXT NOT NULL DEFAULT '',
+    datasets_json TEXT NOT NULL DEFAULT '[]',
+    baselines_json TEXT NOT NULL DEFAULT '[]',
+    metrics_json TEXT NOT NULL DEFAULT '[]',
+    best_results_json TEXT NOT NULL DEFAULT '{}',
+    code_url TEXT,
+    venue TEXT NOT NULL DEFAULT '',
+    compute_cost TEXT,
+    limitations_json TEXT NOT NULL DEFAULT '[]',
+    extracted_from TEXT NOT NULL DEFAULT 'abstract',
+    extracted_at TEXT NOT NULL,
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+CREATE INDEX IF NOT EXISTS idx_profiles_task ON paper_profiles(task);
+CREATE INDEX IF NOT EXISTS idx_profiles_method ON paper_profiles(method_family);
+
+-- v03: user feedback
+CREATE TABLE IF NOT EXISTS user_feedback (
+    id TEXT PRIMARY KEY,
+    paper_id TEXT NOT NULL,
+    feedback_type TEXT NOT NULL,
+    value TEXT NOT NULL,
+    context TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_paper ON user_feedback(paper_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_type ON user_feedback(feedback_type);
+
+-- v03: watchlist
+CREATE TABLE IF NOT EXISTS watchlist (
+    id TEXT PRIMARY KEY,
+    watch_type TEXT NOT NULL,
+    watch_value TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    last_checked TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_watchlist_type ON watchlist(watch_type);
+
+-- v03: credibility assessments
+CREATE TABLE IF NOT EXISTS credibility_assessments (
+    paper_id TEXT PRIMARY KEY,
+    code_available INTEGER,
+    code_url TEXT,
+    open_data INTEGER,
+    venue_tier TEXT NOT NULL DEFAULT 'unknown',
+    citation_count INTEGER,
+    citation_velocity REAL,
+    claim_aggressiveness TEXT NOT NULL DEFAULT 'unknown',
+    baseline_completeness TEXT NOT NULL DEFAULT 'unknown',
+    reproducibility_risk TEXT NOT NULL DEFAULT 'unknown',
+    overall_confidence TEXT NOT NULL DEFAULT 'unknown',
+    assessment_notes TEXT NOT NULL DEFAULT '',
+    assessed_at TEXT NOT NULL,
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+
+-- v03: research context
+CREATE TABLE IF NOT EXISTS research_context (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    current_project TEXT NOT NULL DEFAULT '',
+    current_baseline TEXT NOT NULL DEFAULT '',
+    current_questions_json TEXT NOT NULL DEFAULT '[]',
+    active_reading_group TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+"""
+
 _FTS_SQL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
     title, abstract, topics_json, methodology_tags_json, research_objectives_json,
@@ -274,11 +360,14 @@ class SQLiteStorage:
             self.conn.execute(
                 "INSERT INTO schema_version (version) VALUES (?)", (_SCHEMA_VERSION,)
             )
+            self._migrate_to_v3()
             self.conn.commit()
         else:
             current = existing["version"]
             if current < 2:
                 self._migrate_to_v2()
+            if current < 3:
+                self._migrate_to_v3()
             self.conn.commit()
 
     def _migrate_to_v2(self) -> None:
@@ -312,6 +401,20 @@ class SQLiteStorage:
                 FOREIGN KEY (paper_id) REFERENCES papers(id))""",
         ):
             self.conn.execute(stmt)
+        self.conn.execute(
+            "UPDATE schema_version SET version = ?", (_SCHEMA_VERSION,)
+        )
+
+    def _migrate_to_v3(self) -> None:
+        for stmt in _V3_MIGRATION_SQL.strip().split(";"):
+            # Strip leading/trailing whitespace and comment-only lines
+            lines = [ln for ln in stmt.strip().splitlines() if ln.strip() and not ln.strip().startswith("--")]
+            cleaned = "\n".join(lines).strip()
+            if cleaned:
+                try:
+                    self.conn.execute(cleaned)
+                except sqlite3.OperationalError:
+                    pass
         self.conn.execute(
             "UPDATE schema_version SET version = ?", (_SCHEMA_VERSION,)
         )
@@ -629,6 +732,328 @@ class SQLiteStorage:
             (name, limit),
         ).fetchall()
         return [self._row_to_paper(r) for r in rows]
+
+    # ── Paper Contents (v03) ──
+
+    def save_paper_content(self, content: "PaperContent") -> None:
+        from paper_agent.domain.models.paper_content import PaperContent  # noqa: F811
+
+        sections = [
+            {"name": s.name, "heading": s.heading, "text": s.text, "page_range": list(s.page_range)}
+            for s in content.sections
+        ]
+        tables = [
+            {"caption": t.caption, "headers": t.headers, "rows": t.rows, "section": t.section}
+            for t in content.tables
+        ]
+        self.conn.execute(
+            """INSERT OR REPLACE INTO paper_contents
+            (paper_id, sections_json, tables_json, figure_captions_json, raw_text, parsed_at)
+            VALUES (?,?,?,?,?,?)""",
+            (
+                content.paper_id,
+                json.dumps(sections, ensure_ascii=False),
+                json.dumps(tables, ensure_ascii=False),
+                json.dumps(content.figure_captions, ensure_ascii=False),
+                content.raw_text,
+                content.parsed_at.isoformat() if content.parsed_at else datetime.utcnow().isoformat(),
+            ),
+        )
+        self.conn.commit()
+
+    def get_paper_content(self, paper_id: str) -> "PaperContent | None":
+        from paper_agent.domain.models.paper_content import PaperContent, PaperSection, PaperTable
+
+        row = self.conn.execute(
+            "SELECT * FROM paper_contents WHERE paper_id = ?", (paper_id,)
+        ).fetchone()
+        if not row:
+            return None
+
+        sections_raw = json.loads(row["sections_json"])
+        tables_raw = json.loads(row["tables_json"])
+
+        return PaperContent(
+            paper_id=row["paper_id"],
+            sections=[
+                PaperSection(
+                    name=s["name"], heading=s["heading"], text=s["text"],
+                    page_range=tuple(s.get("page_range", [0, 0])),
+                )
+                for s in sections_raw
+            ],
+            tables=[
+                PaperTable(
+                    caption=t["caption"], headers=t["headers"],
+                    rows=t["rows"], section=t.get("section", ""),
+                )
+                for t in tables_raw
+            ],
+            figure_captions=json.loads(row["figure_captions_json"]),
+            raw_text=row["raw_text"],
+            parsed_at=datetime.fromisoformat(row["parsed_at"]),
+        )
+
+    # ── Paper Profiles (v03) ──
+
+    def save_paper_profile(self, profile: "PaperProfile") -> None:
+        self.conn.execute(
+            """INSERT OR REPLACE INTO paper_profiles
+            (paper_id, task, method_family, method_name, datasets_json, baselines_json,
+             metrics_json, best_results_json, code_url, venue, compute_cost,
+             limitations_json, extracted_from, extracted_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                profile.paper_id,
+                profile.task,
+                profile.method_family,
+                profile.method_name,
+                json.dumps(profile.datasets, ensure_ascii=False),
+                json.dumps(profile.baselines, ensure_ascii=False),
+                json.dumps(profile.metrics, ensure_ascii=False),
+                json.dumps(profile.best_results, ensure_ascii=False),
+                profile.code_url,
+                profile.venue,
+                profile.compute_cost,
+                json.dumps(profile.limitations, ensure_ascii=False),
+                profile.extracted_from,
+                profile.extracted_at.isoformat() if profile.extracted_at else datetime.utcnow().isoformat(),
+            ),
+        )
+        self.conn.commit()
+
+    def get_paper_profile(self, paper_id: str) -> "PaperProfile | None":
+        from paper_agent.domain.models.paper_profile import PaperProfile
+
+        row = self.conn.execute(
+            "SELECT * FROM paper_profiles WHERE paper_id = ?", (paper_id,)
+        ).fetchone()
+        if not row:
+            return None
+
+        return PaperProfile(
+            paper_id=row["paper_id"],
+            task=row["task"],
+            method_family=row["method_family"],
+            method_name=row["method_name"],
+            datasets=json.loads(row["datasets_json"]),
+            baselines=json.loads(row["baselines_json"]),
+            metrics=json.loads(row["metrics_json"]),
+            best_results=json.loads(row["best_results_json"]),
+            code_url=row["code_url"],
+            venue=row["venue"],
+            compute_cost=row["compute_cost"],
+            limitations=json.loads(row["limitations_json"]),
+            extracted_from=row["extracted_from"],
+            extracted_at=datetime.fromisoformat(row["extracted_at"]),
+        )
+
+    def query_paper_profiles(self, filters: dict[str, str]) -> "list[PaperProfile]":
+        from paper_agent.domain.models.paper_profile import PaperProfile
+
+        conditions: list[str] = []
+        params: list[str] = []
+
+        for field, value in filters.items():
+            if field in ("task", "method_family", "method_name", "venue"):
+                conditions.append(f"{field} LIKE ?")
+                params.append(f"%{value}%")
+            elif field in ("datasets", "baselines", "metrics"):
+                conditions.append(f"{field}_json LIKE ?")
+                params.append(f"%{value}%")
+
+        where = " AND ".join(conditions) if conditions else "1=1"
+        rows = self.conn.execute(
+            f"SELECT * FROM paper_profiles WHERE {where}", params
+        ).fetchall()
+
+        return [
+            PaperProfile(
+                paper_id=r["paper_id"],
+                task=r["task"],
+                method_family=r["method_family"],
+                method_name=r["method_name"],
+                datasets=json.loads(r["datasets_json"]),
+                baselines=json.loads(r["baselines_json"]),
+                metrics=json.loads(r["metrics_json"]),
+                best_results=json.loads(r["best_results_json"]),
+                code_url=r["code_url"],
+                venue=r["venue"],
+                compute_cost=r["compute_cost"],
+                limitations=json.loads(r["limitations_json"]),
+                extracted_from=r["extracted_from"],
+                extracted_at=datetime.fromisoformat(r["extracted_at"]),
+            )
+            for r in rows
+        ]
+
+    def get_profile_field_stats(self, field: str) -> dict[str, int]:
+        from collections import Counter
+
+        valid_fields = {"task", "method_family", "method_name", "venue"}
+        if field in valid_fields:
+            rows = self.conn.execute(
+                f"SELECT {field} FROM paper_profiles WHERE {field} != ''"
+            ).fetchall()
+            return dict(Counter(r[0] for r in rows).most_common(50))
+
+        if field in ("datasets", "baselines", "metrics"):
+            rows = self.conn.execute(
+                f"SELECT {field}_json FROM paper_profiles"
+            ).fetchall()
+            counter: Counter[str] = Counter()
+            for r in rows:
+                items = json.loads(r[0])
+                counter.update(items)
+            return dict(counter.most_common(50))
+
+        return {}
+
+    # ── User Feedback (v03) ──
+
+    def save_feedback(
+        self, paper_id: str, feedback_type: str, value: str, context: str = ""
+    ) -> str:
+        import uuid
+        fb_id = uuid.uuid4().hex[:12]
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            "INSERT INTO user_feedback (id, paper_id, feedback_type, value, context, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (fb_id, paper_id, feedback_type, value, context, now),
+        )
+        self.conn.commit()
+        return fb_id
+
+    def get_all_feedback(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM user_feedback ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_feedback_for_paper(self, paper_id: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM user_feedback WHERE paper_id=? ORDER BY created_at",
+            (paper_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Watchlist (v03) ──
+
+    def save_watchlist_item(
+        self, watch_type: str, watch_value: str, description: str = ""
+    ) -> str:
+        import uuid
+        watch_id = uuid.uuid4().hex[:12]
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            "INSERT INTO watchlist (id, watch_type, watch_value, description, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (watch_id, watch_type, watch_value, description, now),
+        )
+        self.conn.commit()
+        return watch_id
+
+    def list_watchlist_items(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM watchlist ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_watchlist_item(self, watch_id: str) -> None:
+        self.conn.execute("DELETE FROM watchlist WHERE id=?", (watch_id,))
+        self.conn.commit()
+
+    def update_watchlist_checked(self, watch_id: str) -> None:
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            "UPDATE watchlist SET last_checked=? WHERE id=?", (now, watch_id)
+        )
+        self.conn.commit()
+
+    # ── Credibility Assessments (v03) ──
+
+    def save_credibility_assessment(self, assessment: "CredibilityAssessment") -> None:
+        self.conn.execute(
+            """INSERT OR REPLACE INTO credibility_assessments
+            (paper_id, code_available, code_url, open_data, venue_tier,
+             citation_count, citation_velocity, claim_aggressiveness,
+             baseline_completeness, reproducibility_risk, overall_confidence,
+             assessment_notes, assessed_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                assessment.paper_id,
+                1 if assessment.code_available else (0 if assessment.code_available is not None else None),
+                assessment.code_url,
+                1 if assessment.open_data else (0 if assessment.open_data is not None else None),
+                assessment.venue_tier,
+                assessment.citation_count,
+                assessment.citation_velocity,
+                assessment.claim_aggressiveness,
+                assessment.baseline_completeness,
+                assessment.reproducibility_risk,
+                assessment.overall_confidence,
+                assessment.assessment_notes,
+                assessment.assessed_at.isoformat() if assessment.assessed_at else datetime.utcnow().isoformat(),
+            ),
+        )
+        self.conn.commit()
+
+    def get_credibility_assessment(self, paper_id: str) -> "CredibilityAssessment | None":
+        from paper_agent.domain.models.credibility import CredibilityAssessment
+
+        row = self.conn.execute(
+            "SELECT * FROM credibility_assessments WHERE paper_id = ?", (paper_id,)
+        ).fetchone()
+        if not row:
+            return None
+
+        return CredibilityAssessment(
+            paper_id=row["paper_id"],
+            code_available=bool(row["code_available"]) if row["code_available"] is not None else None,
+            code_url=row["code_url"],
+            open_data=bool(row["open_data"]) if row["open_data"] is not None else None,
+            venue_tier=row["venue_tier"],
+            citation_count=row["citation_count"],
+            citation_velocity=row["citation_velocity"],
+            claim_aggressiveness=row["claim_aggressiveness"],
+            baseline_completeness=row["baseline_completeness"],
+            reproducibility_risk=row["reproducibility_risk"],
+            overall_confidence=row["overall_confidence"],
+            assessment_notes=row["assessment_notes"],
+            assessed_at=datetime.fromisoformat(row["assessed_at"]),
+        )
+
+    # ── Research Context (v03) ──
+
+    def save_research_context(self, context: dict[str, Any]) -> None:
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            """INSERT OR REPLACE INTO research_context
+            (id, current_project, current_baseline, current_questions_json,
+             active_reading_group, updated_at)
+            VALUES (1,?,?,?,?,?)""",
+            (
+                context.get("current_project", ""),
+                context.get("current_baseline", ""),
+                json.dumps(context.get("current_questions", []), ensure_ascii=False),
+                context.get("active_reading_group", ""),
+                now,
+            ),
+        )
+        self.conn.commit()
+
+    def get_research_context(self) -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT * FROM research_context WHERE id = 1").fetchone()
+        if not row:
+            return None
+        return {
+            "current_project": row["current_project"],
+            "current_baseline": row["current_baseline"],
+            "current_questions": json.loads(row["current_questions_json"]),
+            "active_reading_group": row["active_reading_group"],
+            "updated_at": row["updated_at"],
+        }
 
     # ── Internal ──
 

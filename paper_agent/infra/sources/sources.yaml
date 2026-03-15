@@ -41,6 +41,38 @@ arxiv_categories:
     name: "Systems and Control"
     description: "Control systems, signal processing"
 
+  cs.SE:
+    name: "Software Engineering"
+    description: "Software design, testing, maintenance, program analysis, SE for AI"
+
+  cs.IR:
+    name: "Information Retrieval"
+    description: "Search engines, recommender systems, text mining"
+
+  cs.DC:
+    name: "Distributed, Parallel, and Cluster Computing"
+    description: "Distributed systems, cloud computing, parallel algorithms"
+
+  cs.PL:
+    name: "Programming Languages"
+    description: "Language design, type systems, program analysis, compilers"
+
+  cs.DB:
+    name: "Databases"
+    description: "Database systems, query processing, data management"
+
+  cs.HC:
+    name: "Human-Computer Interaction"
+    description: "User interfaces, interaction design, accessibility"
+
+  cs.CR:
+    name: "Cryptography and Security"
+    description: "Security, privacy, cryptographic protocols"
+
+  stat.ML:
+    name: "Machine Learning (Statistics)"
+    description: "Statistical machine learning, Bayesian methods, learning theory"
+
 # ============================================
 # 学术会议配置
 # ============================================
@@ -145,6 +177,231 @@ conferences:
     api_config:
       venue_key: "coling"
     url: "https://aclanthology.org/"
+    enabled: false
+
+  # ========== NLP 其他会议 ==========
+  eacl:
+    name: "EACL"
+    full_name: "European Chapter of the Association for Computational Linguistics"
+    area: ["NLP"]
+    rank: "A"
+    api_type: "acl_anthology"
+    api_config:
+      venue_key: "eacl"
+    url: "https://aclanthology.org/"
+    enabled: false
+
+  findings:
+    name: "Findings"
+    full_name: "Findings of ACL / EMNLP / NAACL"
+    area: ["NLP"]
+    rank: "A"
+    api_type: "acl_anthology"
+    api_config:
+      venue_key: "findings"
+    url: "https://aclanthology.org/"
+    enabled: false
+
+  # ========== Software Engineering 会议 ==========
+  icse:
+    name: "ICSE"
+    full_name: "International Conference on Software Engineering"
+    area: ["Software Engineering"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/icse"
+    url: ""
+    enabled: true
+
+  fse:
+    name: "FSE"
+    full_name: "ACM SIGSOFT Symposium on the Foundations of Software Engineering"
+    area: ["Software Engineering"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/sigsoft"
+    url: ""
+    enabled: true
+
+  ase:
+    name: "ASE"
+    full_name: "IEEE/ACM International Conference on Automated Software Engineering"
+    area: ["Software Engineering"]
+    rank: "A"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/kbse"
+    url: ""
+    enabled: true
+
+  issta:
+    name: "ISSTA"
+    full_name: "International Symposium on Software Testing and Analysis"
+    area: ["Software Engineering", "Testing"]
+    rank: "A"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/issta"
+    url: ""
+    enabled: false
+
+  msr:
+    name: "MSR"
+    full_name: "Mining Software Repositories"
+    area: ["Software Engineering", "Data Mining"]
+    rank: "A"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/msr"
+    url: ""
+    enabled: true
+
+  saner:
+    name: "SANER"
+    full_name: "IEEE International Conference on Software Analysis, Evolution and Reengineering"
+    area: ["Software Engineering"]
+    rank: "B"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/wcre"
+    url: ""
+    enabled: false
+
+  issre:
+    name: "ISSRE"
+    full_name: "IEEE International Symposium on Software Reliability Engineering"
+    area: ["Software Engineering", "Reliability"]
+    rank: "B"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/issre"
+    url: ""
+    enabled: false
+
+  # ========== IR / Data Mining / Web 会议 ==========
+  sigir:
+    name: "SIGIR"
+    full_name: "ACM SIGIR Conference on Research and Development in Information Retrieval"
+    area: ["Information Retrieval"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/sigir"
+    url: ""
+    enabled: true
+
+  kdd:
+    name: "KDD"
+    full_name: "ACM SIGKDD Conference on Knowledge Discovery and Data Mining"
+    area: ["Data Mining", "Machine Learning"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/kdd"
+    url: ""
+    enabled: true
+
+  www:
+    name: "TheWebConf"
+    full_name: "The Web Conference"
+    area: ["Web", "Data Mining", "NLP"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/www"
+    url: ""
+    enabled: true
+
+  wsdm:
+    name: "WSDM"
+    full_name: "ACM International Conference on Web Search and Data Mining"
+    area: ["Information Retrieval", "Data Mining"]
+    rank: "A"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/wsdm"
+    url: ""
+    enabled: false
+
+  cikm:
+    name: "CIKM"
+    full_name: "ACM International Conference on Information and Knowledge Management"
+    area: ["Information Retrieval", "Data Mining"]
+    rank: "B"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/cikm"
+    url: ""
+    enabled: false
+
+  recsys:
+    name: "RecSys"
+    full_name: "ACM Conference on Recommender Systems"
+    area: ["Information Retrieval", "Recommender Systems"]
+    rank: "A"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/recsys"
+    url: ""
+    enabled: false
+
+  # ========== Systems / DB 会议 ==========
+  osdi:
+    name: "OSDI"
+    full_name: "USENIX Symposium on Operating Systems Design and Implementation"
+    area: ["Systems"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/osdi"
+    url: ""
+    enabled: false
+
+  sosp:
+    name: "SOSP"
+    full_name: "ACM Symposium on Operating Systems Principles"
+    area: ["Systems"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/sosp"
+    url: ""
+    enabled: false
+
+  sigmod:
+    name: "SIGMOD"
+    full_name: "ACM SIGMOD International Conference on Management of Data"
+    area: ["Databases"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/sigmod"
+    url: ""
+    enabled: false
+
+  vldb:
+    name: "VLDB"
+    full_name: "International Conference on Very Large Data Bases"
+    area: ["Databases"]
+    rank: "A*"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/vldb"
+    url: ""
+    enabled: false
+
+  # ========== Multi-Agent / AI Applications 会议 ==========
+  aamas:
+    name: "AAMAS"
+    full_name: "International Conference on Autonomous Agents and Multi-Agent Systems"
+    area: ["AI", "Multi-Agent Systems"]
+    rank: "A"
+    api_type: "dblp"
+    api_config:
+      venue_key: "conf/atal"
+    url: ""
     enabled: false
 
   # ========== CV 专业会议 ==========
@@ -272,6 +529,13 @@ other_sources:
     url: ""
     api_type: "s2_api"
     api_key_required: true
+    enabled: false
+
+  openalex:
+    name: "OpenAlex"
+    description: "Free, open academic graph with 250M+ scholarly works"
+    url: "https://openalex.org"
+    api_type: "openalex_api"
     enabled: false
 
   dblp:
@@ -422,6 +686,80 @@ research_area_templates:
     recommended_sources:
       arxiv: ["cs.CV", "cs.LG", "cs.AI"]
       conferences: ["neurips", "icml", "iclr", "cvpr"]
+
+  software_engineering:
+    name: "Software Engineering"
+    description: "研究软件测试、程序分析、代码生成、DevOps、软件维护等"
+    topics:
+      - "Software Engineering"
+      - "Software Testing"
+      - "Program Analysis"
+      - "Code Generation"
+      - "Software Maintenance"
+    keywords:
+      - "software testing"
+      - "program analysis"
+      - "code review"
+      - "bug detection"
+      - "code generation"
+      - "code LLM"
+      - "static analysis"
+      - "fault localization"
+      - "software evolution"
+      - "continuous integration"
+      - "code completion"
+    recommended_sources:
+      arxiv: ["cs.SE", "cs.PL", "cs.AI"]
+      conferences: ["icse", "fse", "ase", "issta", "msr"]
+
+  ai_for_software_engineering:
+    name: "AI for Software Engineering"
+    description: "研究 AI/LLM 在软件工程中的应用：代码生成、缺陷预测、自动修复等"
+    topics:
+      - "AI for Software Engineering"
+      - "Code Intelligence"
+      - "Automated Program Repair"
+      - "LLM for Code"
+      - "Software Analytics"
+    keywords:
+      - "code generation"
+      - "LLM for code"
+      - "Copilot"
+      - "CodeLLM"
+      - "automated program repair"
+      - "bug prediction"
+      - "code summarization"
+      - "code search"
+      - "neural code"
+      - "deep learning for SE"
+      - "AI agent"
+      - "software agent"
+    recommended_sources:
+      arxiv: ["cs.SE", "cs.CL", "cs.AI", "cs.LG"]
+      conferences: ["icse", "fse", "ase", "msr", "acl", "emnlp", "neurips"]
+
+  information_retrieval:
+    name: "Information Retrieval & Data Mining"
+    description: "研究搜索引擎、推荐系统、文本挖掘、知识图谱等"
+    topics:
+      - "Information Retrieval"
+      - "Recommender Systems"
+      - "Text Mining"
+      - "Knowledge Graphs"
+    keywords:
+      - "retrieval"
+      - "search"
+      - "ranking"
+      - "recommendation"
+      - "knowledge graph"
+      - "RAG"
+      - "dense retrieval"
+      - "embedding"
+      - "question answering"
+      - "text mining"
+    recommended_sources:
+      arxiv: ["cs.IR", "cs.CL", "cs.AI", "cs.LG"]
+      conferences: ["sigir", "kdd", "www", "wsdm", "cikm", "acl", "emnlp"]
 
 # ============================================
 # 用户自定义数据源（由用户添加）

@@ -1,49 +1,44 @@
 ---
-description: Generate a literature survey from selected papers
+description: Quick literature survey — one-call topic scan, then optional full survey
 argument-hint: <topic>
 allowed-tools: [
-  "mcp__plugin_paper-agent_paper-agent__paper_search",
-  "mcp__plugin_paper-agent_paper-agent__paper_search_online",
-  "mcp__plugin_paper-agent_paper-agent__paper_survey_collect",
-  "mcp__plugin_paper-agent_paper-agent__paper_batch_show",
-  "mcp__plugin_paper-agent_paper-agent__paper_compare",
-  "mcp__plugin_paper-agent_paper-agent__paper_export",
+  "mcp__paper-agent__paper_quick_scan",
+  "mcp__paper-agent__paper_batch_show",
+  "mcp__paper-agent__paper_compare",
+  "mcp__paper-agent__paper_export",
+  "mcp__paper-agent__paper_group_add",
+  "mcp__paper-agent__paper_save_report",
+  "Read",
   "Write"
 ]
 ---
 
 # Paper Survey
 
-Generate a structured literature survey around a research topic.
+> Workflow detail: read `.claude/skills/literature-survey/SKILL.md` for full survey template, quick/full mode rules, and output format.
+
+Quick-first literature survey.
 
 ## Process
 
-1. Parse $ARGUMENTS as the survey topic
-2. Analyze the topic — extract keywords, expand search terms, confirm with user
-3. Search for papers:
-   - `paper_search(query)` for local library
-   - If results insufficient, ask user: "本地找到 N 篇，要从 arXiv 在线补充搜索吗？"
-   - If yes, `paper_search_online(query)` for additional papers
-4. Present candidate list and let user select which to include
-5. Ask which sections to include:
-   - a) Background & Motivation
-   - b) 方法分类与对比
-   - c) 实验结果汇总
-   - d) Open Problems & Future Directions
-   - e) 全部
-6. Call `paper_batch_show(selected_ids)` to get full details
-7. Generate the survey in Chinese with proper citations
-8. Show draft and ask for feedback: "需要修改哪里？"
-9. Iterate based on feedback
-10. Ask save path and write to file
-11. Offer to export BibTeX: `paper_export(ids, format="bibtex")`
+### Step 1 — Resolve papers
 
-## Output Format
+- **Explicit reference** ("根据已有的", "用刚才的", "基于这些写综述"): use those papers directly. Go to Step 2 immediately — no candidate listing, no selection question.
+- **Ambiguous** (same topic in context): ASK "刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+- **New search**: Call `paper_quick_scan(topic=$ARGUMENTS, limit=20)`, then show candidates as table and ASK "全部纳入还是选几篇？"
 
-Survey should include:
-- 引言与背景
-- 方法分类 (taxonomy)
-- 各方法详解与对比表格
-- 实验对比
-- 研究空白与未来方向
-- 参考文献
+### Step 2 — Generate survey
+
+Generate survey narrative in Chinese with structured tables:
+- **方法分类表**: | 类别 | 代表论文 | 核心思路 | 优势 | 局限 |
+- **实验对比表**: | 论文 | 数据集 | 指标1 | 指标2 | 亮点 |
+- **研究空白与趋势**: open problems, emerging directions
+- **结论与建议**: 当前方向的成熟度判断、主流方法对比结论、研究机会在哪里
+
+### Step 3 — Auto-save
+
+Call `paper_save_report(report_type="survey", content=<survey markdown>, filename="{topic}.md")` to persist the survey.
+
+Tell user: "📄 文献综述已保存至 {path}。要修改、补充、还是导出 BibTeX？"
+
+Default is quick mode (20 candidates). Full mode (40+) only when user explicitly asks.

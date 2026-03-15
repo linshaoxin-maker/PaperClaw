@@ -52,6 +52,13 @@ Tools (v02 — multi-paper intelligence):
   paper_search_online   Real-time search via arXiv + S2
   paper_find_and_download  Find paper by exact title + download PDF
 
+Tools (v03 — capability-sunk automation):
+  paper_quick_scan       One-call topic scan: local + online, deduped, ranked
+  paper_auto_triage      Auto-classify papers into important/to_read/skip
+  paper_citation_trace   Recursive citation trace (up to 3 levels deep)
+  paper_morning_brief    One-call morning pipeline: context + collect + digest
+  paper_trend_data       Publication trend data by year × direction
+
 Resources:
   paper://digest/today  Today's digest
   paper://stats         Library stats snapshot

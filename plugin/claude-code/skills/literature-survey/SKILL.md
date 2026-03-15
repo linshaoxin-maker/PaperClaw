@@ -1,121 +1,44 @@
 ---
 name: literature-survey
-description: Generate a structured literature survey — from keyword refinement to final report with BibTeX. Use when user says "综述", "survey", "文献调研", "帮我写个综述", "这个方向有哪些工作", or wants to systematically review a research area.
-version: 0.2.0
+description: Literature survey and review workflow. Triggers on "survey", "综述", "这个方向有什么", "literature review", "related work".
 ---
 
-# Literature Survey — 文献综述
+# Literature Survey
 
-从需求澄清到综述成文的完整流程，带交互式论文筛选和迭代修改。
+## Flow
 
-## 交互流程
+1. **Context carry-over**:
+   - **Explicit reference** ("根据已有的", "用刚才的", "基于这些写综述"): use those papers directly. Skip to step 3 — no candidate listing, no selection question.
+   - **Ambiguous** (same topic in context): ASK "刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+   - **No relevant context**: Call `paper_quick_scan(topic, limit=20)`, then show as table and **[FORK]** "全部纳入还是选几篇？"
+3. **Extract structured profiles**: Call `paper_extract(paper_id)` for each selected paper to get structured data (task, method, datasets, baselines, metrics, best_results).
+4. **Build comparison table**: Call `paper_compare_table(paper_ids)` for data-driven comparison instead of LLM-only generation.
+5. Generate survey with structured tables:
+   - **方法分类表**: | 类别 | 代表论文 | 核心思路 | 优势 | 局限 | — built from extracted profiles
+   - **实验对比表**: | 论文 | 数据集 | 指标1 | 指标2 | 最佳结果 | — built from `paper_compare_table` data
+   - **可信度对比**: | 论文 | venue | code | 引用数 | 复现风险 | — call `paper_credibility_batch(paper_ids)`
+   - **研究空白与趋势**: call `paper_field_stats("method_family")` and `paper_field_stats("datasets")` for data-driven insights
+   - **结论与建议**: 当前方向的成熟度判断、主流方法对比结论、研究机会在哪里
+6. **Auto-save**: call `paper_save_report(report_type="survey", content=<survey markdown>, filename="{topic}.md")` to persist the survey.
+7. **[FORK]** "文献综述已保存至 {path}。要修改、补充、还是导出 BibTeX？"
 
-### Phase 1: 需求澄清
+## If user wants to export
 
-**必须依次询问用户**：
+- `paper_export(paper_ids, format)` for BibTeX/markdown
+- `paper_group_add(name="survey-{topic}", paper_ids, create_if_missing=True)` to group papers
 
-> 🗣️ 综述的主题是什么？
+## Quick mode (default)
 
-> 🗣️ 要覆盖哪些子方向？我帮你拆关键词。
-> （AI 根据主题提出 3-5 组关键词分组）
+`paper_quick_scan` returns 15-20 candidates with one-line summaries. Present this list and let user decide next steps. This IS the survey for most cases.
 
-> 🗣️ 时间范围？
-> a) 最近 1 年
-> b) 最近 3 年
-> c) 最近 5 年（推荐综述用）
-> d) 自定义: ___
+## Full mode
 
-> 🗣️ 我拆分的关键词如下，覆盖够吗？要调整吗？
-> - 方向 A: {keywords}
-> - 方向 B: {keywords}
-> - 方向 C: {keywords}
+Only when user explicitly asks for "完整综述" / "full survey" / "详细一点":
+- Expand to 40+ candidates via `paper_quick_scan(topic, limit=40)`
+- Generate multi-section survey with per-paper analysis
 
-### Phase 2: 搜索论文
+## Rules
 
-**工具**: `paper_search_batch(queries, diverse=True)`
-
-呈现各方向命中数后，**必须询问用户**：
-
-> 🗣️ 本地搜索结果：
-> - 方向 A: {n} 篇
-> - 方向 B: {n} 篇
-> - 方向 C: {n} 篇
->
-> 本地结果{够/不够}。要从在线源（arXiv + Semantic Scholar）补充吗？
-
-如果用户说要：
-**工具**: `paper_search_online(query)` （对每个不足的方向）
-
-### Phase 3: 论文筛选
-
-合并去重，按相关度排序，呈现候选列表。
-
-**必须询问用户**：
-
-> 🗣️ 以下是候选论文（共 {n} 篇），按相关度排序：
->
-> | # | 标题 | 年份 | 来源 | 评分 |
-> |---|------|------|------|------|
-> | 1 | ... | ... | ... | ... |
->
-> 要纳入综述的论文？可以给编号（如 1,2,5-10），或"全选"，或"前 N 篇"。
-
-**工具**: `paper_batch_show(选中的 IDs)` — 获取详细信息
-
-### Phase 4: 综述生成
-
-**必须询问用户**：
-
-> 🗣️ 综述包含哪些章节？
-> a) Background & Motivation
-> b) 方法分类与对比
-> c) 实验结果汇总
-> d) 研究空白与未来方向
-> e) 全部（推荐）
-> f) 自定义: ___
-
-> 🗣️ 你最关注的分析维度是什么？（这会影响对比表格的重点）
-> - 方法架构差异
-> - 实验性能对比
-> - 适用场景区分
-> - 其他: ___
-
-使用 [survey-template](references/survey-template.md) 生成综述草稿。
-
-### Phase 5: 迭代修改
-
-**必须询问用户**：
-
-> 🗣️ 综述草稿完成（约 {n} 字）。看看哪里需要修改？
-> 直到用户说"可以了"才进入下一步。
-
-### Phase 6: 交付件
-
-**必须询问用户**：
-
-> 🗣️ 保存综述吗？
-> - 综述文件：`survey/{topic}.md`（默认）
-> - BibTeX：需要导出吗？默认 `survey/{topic}-refs.bib`
-> - 论文分组：要创建一个 "{topic}" 分组吗？
-
-**工具**:
-- 写入综述文件
-- `paper_export(paper_ids, "bibtex")` → 写入 .bib 文件
-- `paper_group_create(topic)` + `paper_group_add(topic, paper_ids)`
-
-## 涉及的 MCP 工具
-
-| 工具 | 阶段 | 用途 |
-|------|------|------|
-| `paper_search_batch` | Phase 2 | 多方向批量搜索 |
-| `paper_search_online` | Phase 2 | 在线补充搜索 |
-| `paper_batch_show` | Phase 3 | 获取论文详情 |
-| `paper_compare` | Phase 4 | 方法对比数据 |
-| `paper_export` | Phase 6 | 导出 BibTeX |
-| `paper_group_create` | Phase 6 | 创建论文分组 |
-| `paper_group_add` | Phase 6 | 添加论文到分组 |
-
-## 可跳转的 Skill
-
-- 想深入某篇 → **deep-dive**
-- 想看引用链 → **citation-explore**
+- 2 checkpoints max (selection + revision/export). Don't ask about search parameters.
+- Default to quick mode. Don't generate a full survey unless asked.
+- Always auto-save the survey via `paper_save_report`. Additional export (BibTeX) is opt-in via FORK.

@@ -11,12 +11,7 @@ from typing import Optional
 
 import typer
 
-from paper_agent.cli._skill_content import (
-    ROUTER_SKILL,
-    SKILL_TEMPLATES,
-    TEMPLATE_FILENAMES,
-    WORKFLOW_SKILLS,
-)
+from paper_agent.cli._skill_content import ROUTER_SKILL, WORKFLOW_SKILLS
 from paper_agent.cli.console import console, print_error, print_success
 
 setup_app = typer.Typer(
@@ -64,6 +59,36 @@ def _merge_mcp_json(path: Path, cmd: str, args: list[str]) -> None:
     path.write_text(json.dumps(existing, indent=2, ensure_ascii=False) + "\n")
 
 
+_PA_MARKER_START = "<!-- paper-agent:start -->"
+_PA_MARKER_END = "<!-- paper-agent:end -->"
+
+
+def _merge_claude_md(path: Path, content: str) -> None:
+    """Write paper-agent section into CLAUDE.md without clobbering user content.
+
+    - File doesn't exist → create with markers
+    - File has markers → replace only the section between them
+    - File exists, no markers → append section at the end
+    """
+    block = f"{_PA_MARKER_START}\n{content}\n{_PA_MARKER_END}\n"
+
+    if not path.exists():
+        path.write_text(block)
+        return
+
+    existing = path.read_text()
+    if _PA_MARKER_START in existing and _PA_MARKER_END in existing:
+        start = existing.index(_PA_MARKER_START)
+        end = existing.index(_PA_MARKER_END) + len(_PA_MARKER_END)
+        # consume trailing newline if present
+        if end < len(existing) and existing[end] == "\n":
+            end += 1
+        path.write_text(existing[:start] + block + existing[end:])
+    else:
+        separator = "" if existing.endswith("\n") else "\n"
+        path.write_text(existing + separator + "\n" + block)
+
+
 def _init_workspace(target: Path) -> None:
     """Create .paper-agent/ workspace directory in the project."""
     from paper_agent.services.workspace_manager import WorkspaceManager
@@ -105,36 +130,31 @@ def setup_cursor(
         print_error("--scope 必须是 'project' 或 'global'")
         raise typer.Exit(1)
 
-    console.print("\n[bold]下一步：[/bold]")
+    console.print("\n[bold green]✅ 安装完成！[/bold green]")
+    console.print("\n[bold]自检：[/bold]")
+    console.print("  [cyan]paper-agent doctor[/cyan]  ← 检查安装是否完整")
+    console.print("\n[bold]开始使用：[/bold]")
     console.print("  1. 重启 Cursor（或 Cmd+Shift+P → Reload Window）")
-    console.print("  2. 在 Agent chat 中说 [cyan]\"start my day\"[/cyan] 或 [cyan]\"搜索论文 transformer\"[/cyan]")
-    console.print("  3. Agent 会自动调用 paper-agent MCP 工具\n")
+    console.print("  2. 在 Agent chat 中说 [cyan]\"start my day\"[/cyan] 开始使用")
+    console.print("  3. 或直接说 [cyan]\"帮我找 transformer 相关论文\"[/cyan]\n")
 
 
 def _write_cursor_skills(skills_root: Path) -> int:
-    """Write all paper-agent skill directories under *skills_root*.
+    """Write the router skill + 6 workflow skills into Cursor's skill dirs."""
+    written = 0
 
-    Returns the number of skill directories written.
-    """
     router_dir = skills_root / "paper-agent"
     router_dir.mkdir(parents=True, exist_ok=True)
     (router_dir / "SKILL.md").write_text(ROUTER_SKILL)
+    written += 1
 
-    count = 1
-    for skill_name, skill_content in WORKFLOW_SKILLS.items():
-        skill_dir = skills_root / skill_name
+    for name, content in WORKFLOW_SKILLS.items():
+        skill_dir = skills_root / f"paper-agent-{name}"
         skill_dir.mkdir(parents=True, exist_ok=True)
-        (skill_dir / "SKILL.md").write_text(skill_content)
+        (skill_dir / "SKILL.md").write_text(content)
+        written += 1
 
-        template = SKILL_TEMPLATES.get(skill_name)
-        if template:
-            ref_dir = skill_dir / "references"
-            ref_dir.mkdir(parents=True, exist_ok=True)
-            filename = TEMPLATE_FILENAMES[skill_name]
-            (ref_dir / filename).write_text(template)
-        count += 1
-
-    return count
+    return written
 
 
 def _setup_cursor_project(target: Path, cmd: str, args: list[str]) -> None:
@@ -145,8 +165,8 @@ def _setup_cursor_project(target: Path, cmd: str, args: list[str]) -> None:
     print_success(f"MCP → {mcp_path}")
 
     skills_root = cursor_dir / "skills"
-    n = _write_cursor_skills(skills_root)
-    print_success(f"Skills → {skills_root}  ({n} skill directories)")
+    count = _write_cursor_skills(skills_root)
+    print_success(f"Skills → {skills_root} ({count} skills)")
 
     rule_dir = cursor_dir / "rules"
     rule_dir.mkdir(parents=True, exist_ok=True)
@@ -167,8 +187,8 @@ def _setup_cursor_global(cmd: str, args: list[str]) -> None:
     print_success(f"MCP → {mcp_path}")
 
     skills_root = cursor_home / "skills"
-    n = _write_cursor_skills(skills_root)
-    print_success(f"Skills → {skills_root}  ({n} skill directories)")
+    count = _write_cursor_skills(skills_root)
+    print_success(f"Skills → {skills_root} ({count} skills)")
 
     rule_dir = cursor_home / "rules"
     rule_dir.mkdir(parents=True, exist_ok=True)
@@ -203,6 +223,24 @@ def setup_claude_code(
         raise typer.Exit(1)
 
 
+def _write_claude_skills(skills_root: Path) -> int:
+    """Write the router skill + 6 workflow skills into .claude/skills/ for Claude Code."""
+    written = 0
+
+    router_dir = skills_root / "paper-intelligence"
+    router_dir.mkdir(parents=True, exist_ok=True)
+    (router_dir / "SKILL.md").write_text(ROUTER_SKILL)
+    written += 1
+
+    for name, content in WORKFLOW_SKILLS.items():
+        skill_dir = skills_root / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(content)
+        written += 1
+
+    return written
+
+
 def _setup_claude_project(target: Path, cmd: str, args: list[str]) -> None:
     mcp_path = target / ".mcp.json"
     _merge_mcp_json(mcp_path, cmd, args)
@@ -212,22 +250,30 @@ def _setup_claude_project(target: Path, cmd: str, args: list[str]) -> None:
     commands_dir.mkdir(parents=True, exist_ok=True)
     for name, content in _CLAUDE_COMMANDS.items():
         (commands_dir / name).write_text(content)
-    cmd_names = ", ".join(f"/{n.removesuffix('.md')}" for n in _CLAUDE_COMMANDS)
-    print_success(f"Commands → {commands_dir}  ({cmd_names})")
+    print_success(
+        f"Commands → {commands_dir}  "
+        "(/paper, /start-my-day, /paper-search, /paper-analyze, /paper-collect, "
+        "/paper-setup, /paper-compare, /paper-survey, /paper-download, "
+        "/paper-triage, /paper-insight)"
+    )
+
+    skills_dir = target / ".claude" / "skills"
+    count = _write_claude_skills(skills_dir)
+    print_success(f"Skills → {skills_dir} ({count} workflow skills)")
 
     claude_md = target / "CLAUDE.md"
-    if not claude_md.exists():
-        claude_md.write_text(_CLAUDE_MD)
-        print_success(f"CLAUDE.md → {claude_md}")
-    else:
-        console.print(f"  [dim]CLAUDE.md 已存在，跳过[/dim]")
+    _merge_claude_md(claude_md, _CLAUDE_MD)
+    print_success(f"CLAUDE.md → {claude_md}")
 
     _init_workspace(target)
 
-    console.print("\n[bold]下一步：[/bold]")
+    console.print("\n[bold green]✅ 安装完成！[/bold green]")
+    console.print("\n[bold]自检：[/bold]")
+    console.print("  [cyan]paper-agent doctor[/cyan]  ← 检查安装是否完整")
+    console.print("\n[bold]开始使用：[/bold]")
     console.print(f"  1. 在 [cyan]{target}[/cyan] 目录运行 [cyan]claude[/cyan]")
-    console.print("  2. 试试 [cyan]/start-my-day[/cyan] 命令")
-    console.print("  3. 或直接说 [cyan]\"搜索论文 transformer\"[/cyan]\n")
+    console.print("  2. 输入 [cyan]/paper[/cyan] 查看所有功能")
+    console.print("  3. 或直接说 [cyan]\"帮我找 transformer 相关的论文\"[/cyan]\n")
 
 
 def _setup_claude_global(cmd: str, args: list[str]) -> None:
@@ -256,16 +302,37 @@ def _setup_claude_global(cmd: str, args: list[str]) -> None:
         print_error("claude mcp add 超时。请手动运行上述命令。")
         raise typer.Exit(1)
 
-    console.print("\n[bold]下一步：[/bold]")
+    claude_home = Path.home() / ".claude"
+    claude_home.mkdir(parents=True, exist_ok=True)
+
+    commands_dir = claude_home / "commands"
+    commands_dir.mkdir(parents=True, exist_ok=True)
+    for name, content in _CLAUDE_COMMANDS.items():
+        (commands_dir / name).write_text(content)
+    print_success(f"Commands → {commands_dir} ({len(_CLAUDE_COMMANDS)} commands)")
+
+    skills_dir = claude_home / "skills"
+    count = _write_claude_skills(skills_dir)
+    print_success(f"Skills → {skills_dir} ({count} workflow skills)")
+
+    claude_md = claude_home / "CLAUDE.md"
+    _merge_claude_md(claude_md, _CLAUDE_MD)
+    print_success(f"CLAUDE.md → {claude_md}")
+
+    console.print("\n[bold green]✅ 安装完成！[/bold green]")
+    console.print("\n[bold]自检：[/bold]")
+    console.print("  [cyan]paper-agent doctor[/cyan]  ← 检查安装是否完整")
+    console.print("\n[bold]开始使用：[/bold]")
     console.print("  1. 在任意目录运行 [cyan]claude[/cyan]")
-    console.print("  2. 直接说 [cyan]\"搜索论文 transformer\"[/cyan] 使用 paper-agent 工具\n")
+    console.print("  2. 输入 [cyan]/paper[/cyan] 查看所有功能")
+    console.print("  3. 或直接说 [cyan]\"帮我找 transformer 相关的论文\"[/cyan]\n")
 
 
 # ═══════════════════════════════════════════════════════════════════
 # Embedded templates — self-contained, no path dependencies
 # ═══════════════════════════════════════════════════════════════════
 
-_CURSOR_SKILL = ROUTER_SKILL  # re-exported for _CURSOR_RULE reference
+_CURSOR_SKILL_LEGACY = ""  # Replaced by _write_cursor_skills() using _skill_content.py
 
 _CURSOR_RULE = """\
 ---
@@ -283,47 +350,55 @@ alwaysApply: false
 ## 触发条件
 
 ### 日常推荐
-- 用户说 "start my day" 或 "今日推荐" → `paper_collect(days=1)` + `paper_digest()`
+- 用户说 "start my day" / "今日推荐" / "morning" → `paper_morning_brief(days=1)` 一次调用完成全部
 
 ### 搜索
-- 用户说 "搜索论文" / "paper search" + 关键词 → `paper_search(query)`
-- 结果少时建议用户使用 `paper_search(query, diverse=True)` 扩展关键词
-- 本地不够时建议 `paper_search_online(query)` 在线搜索
-
-### 采集
-- 用户说 "收集论文" / "paper collect" → `paper_collect()`
+- 搜索关键词 → `paper_search(query)` 或 `paper_quick_scan(topic)` (含在线补充)
+- 结果少时自动建议 diverse 搜索或在线搜索
 
 ### 单篇分析
-- 用户说 "分析论文" / "paper-analyze" + ID → `paper_show(paper_id)` 并生成分析笔记
-- 用户提到 arXiv ID 格式（如 `2301.12345`）→ `paper_show()`
+- "分析论文" / arXiv ID → `paper_show()` + 生成分析 + `paper_note_add(mark_as="reading")`
 
-### 多篇对比
-- 用户说 "对比论文" / "论文比较" / "paper compare" → `paper_batch_show` + `paper_compare`
-- 用户说 "这几篇有什么区别" / "比一下方法" → 同上
+### 批量筛选
+- "筛一下" / "哪些值得看" / "triage" → `paper_auto_triage()` 自动三档分流
+
+### 引用追踪
+- "引用链" / "谁引了" / "citation" → `paper_citation_trace()` 递归追踪
+
+### 趋势分析
+- "趋势" / "trend" / "这个方向火不火" → `paper_quick_scan()` + `paper_trend_data()`
 
 ### 文献综述
-- 用户说 "写综述" / "literature survey" / "paper survey" → Survey 工作流
-- 用户说 "这个方向有哪些工作" / "梳理一下研究现状" → 同上
+- "综述" / "survey" → `paper_quick_scan()` quick-first 模式
+
+### 对比
+- "对比论文" → `paper_batch_show` + `paper_compare`
 
 ### 下载
-- 用户说 "下载论文" / "paper download" → `paper_download(paper_ids)`
+- 给论文标题 → `paper_find_and_download(title)`
+- 给 arXiv ID → `paper_download(paper_ids)`
 
-### 导出
-- 用户说 "导出 BibTeX" / "export" → `paper_export(paper_ids, format)`
-
-### 编码上下文
-- 用户在 AI/ML 代码中提到方法名（transformer, attention, BERT, LoRA, GNN 等）→ 建议搜索相关论文
+### 分组管理
+- 需要建组+加论文 → `paper_group_add(name, ids, create_if_missing=True)` 一步到位
 
 ## 行为规范
 
-- 所有论文分析和摘要使用中文输出
-- 论文标题使用 `[[论文标题]]` wikilink 格式
-- 搜索结果保持精简，深度分析才展开全部内容
-- 如果 paper-agent 未初始化，引导用户运行 `paper-agent init`
-- 搜索结果少时主动提示：可以尝试 `diverse=True` 扩展关键词，或在线搜索
+- **对话上下文延续**：如果本轮对话中已经搜到/讨论过论文：
+  - 用户明确引用（"根据已有的"、"用刚才的"、"基于这些写综述"）→ 直接用，不要确认，不要重搜
+  - 用户说了同主题但没明确引用 → 问一下："刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+  - 用户换了新主题 → 当新搜索处理
+  - 没有上下文 → 直接搜，不要多问
+- **意图驱动**：用户意图明确时（如"根据已有的写综述"），跳过所有中间步骤直接出结果。只有意图真正模糊时才问确认。候选列表展示、维度选择、参数调整等中间步骤，只在缺少必要信息时才执行。
+- 中文输出所有分析和摘要
+- fork-only: 只在分叉决策点暂停，最多 2-3 选项；结果之前最多 2 轮确认
+- 工作区操作（note_add/reading_status/group_add）自动执行；文件导出需用户在 FORK 中确认
+- 论文列表必须用表格展示（| # | 标题 | 评分 | 关键词 | 一句话 |），不要用 bullet list
+- 每个 workflow 输出必须以「结论与建议」结尾——告诉用户这些数据意味着什么、下一步该怎么做
+- 读取 `paper_workspace_context()` 的 `mode` 字段判断用户类型
+- paper-agent 未初始化时引导运行 `paper-agent init`
 """
 
-_ANALYSIS_TEMPLATE = ""  # templates now live in _skill_content.py
+_ANALYSIS_TEMPLATE_LEGACY = ""  # Replaced by deep-dive skill's inline template
 
 _CLAUDE_MD = """\
 # Paper Agent
@@ -332,156 +407,270 @@ This project uses **paper-agent** MCP server for research paper intelligence.
 
 ## Available MCP Tools
 
-### Core Tools (v01 — single-paper)
-- `paper_search(query, diverse=False)` — search local library (diverse=True expands keywords via synonyms)
-- `paper_show(paper_id)` — show paper details (accepts arXiv IDs like `2301.12345`)
-- `paper_collect(days)` — collect from arXiv + DBLP + Semantic Scholar concurrently
-- `paper_digest()` — generate daily recommendations
+### Core (v01)
+- `paper_search(query, diverse=False)` — search local library
+- `paper_show(paper_id)` — paper details (accepts arXiv IDs)
+- `paper_collect(days)` — collect from arXiv + DBLP + S2
+- `paper_digest()` — daily recommendations
 - `paper_stats()` — library statistics
 
-### Multi-Paper Intelligence (v02)
-- `paper_search_batch(queries, limit_per_query)` — search multiple topics at once (for surveys)
-- `paper_batch_show(paper_ids)` — get details for multiple papers at once
-- `paper_compare(paper_ids, aspects)` — structured comparison data for multiple papers
-- `paper_search_online(query, sources=["arxiv","s2"])` — search arXiv + Semantic Scholar online
-- `paper_survey_collect(keywords, venues, years_back)` — collect papers over N years for survey
-- `paper_download(paper_ids)` — download PDF files from arXiv
-- `paper_export(paper_ids, format)` — export to BibTeX / markdown / JSON
-- `paper_find_and_download(title)` — find by exact title and download PDF
-
 ### Workspace Layer (v02)
-- `paper_workspace_context()` — get workspace context (recent activity, reading progress)
-- `paper_workspace_status()` — rebuild and show `.paper-agent/README.md` dashboard
-- `paper_reading_status(paper_ids, status)` — set reading status (to_read/reading/read/important)
-- `paper_reading_stats()` — reading progress statistics
-- `paper_note_add(paper_id, content, note_type)` — save analysis note
-- `paper_group_create(name, description)` — create a paper group
-- `paper_group_add(name, paper_ids)` — add papers to a group
-- `paper_group_list()` — list all groups
-- `paper_citations(paper_id, direction, limit)` — query citation relationships
+- `paper_workspace_context()` — session recovery (returns `mode: "workspace"|"lightweight"`)
+- `paper_workspace_status()` — human-readable dashboard
+- `paper_reading_status(paper_ids, status)` — mark as to_read/reading/read/important
+- `paper_note_add(paper_id, content, source, mark_as)` — add note + optionally mark status
+- `paper_group_create(name)` / `paper_group_add(name, ids, create_if_missing)` — manage groups
+- `paper_citations(paper_id, direction)` — single-level citation lookup
 
-### Profile & Sources Management
-- `paper_profile()` — view current research profile
-- `paper_profile_update(topics, keywords, enable_sources)` — create/update profile via conversation
-- `paper_sources_list()` — list all available sources (arXiv categories, conferences)
-- `paper_sources_enable(enable, disable)` — enable/disable specific sources
-- `paper_templates_list()` — list research area templates for quick profile setup
+### Multi-Paper Intelligence (v02)
+- `paper_search_batch(queries)` — multi-topic search
+- `paper_batch_show(paper_ids)` — bulk paper details
+- `paper_compare(paper_ids, aspects)` — structured comparison
+- `paper_search_online(query)` — real-time arXiv + S2
+- `paper_survey_collect(keywords, venues, years_back)` — survey collection
+- `paper_download(paper_ids)` — PDF download
+- `paper_export(paper_ids, format)` — BibTeX/markdown/JSON
+- `paper_find_and_download(title)` — find by exact title + download
+
+### Capability-Sunk Automation (v03)
+- `paper_quick_scan(topic, limit=20)` — one-call topic scan: local + online, deduped, ranked
+- `paper_auto_triage(paper_ids, top_n=5)` — auto-classify into important/to_read/skip
+- `paper_citation_trace(paper_id, max_depth=2)` — recursive citation trace in one call
+- `paper_morning_brief(days=1)` — one-call morning pipeline: context + collect + digest + auto-mark
+- `paper_trend_data(topic, years_back=3)` — publication trend by year x direction
+
+### Profile & Sources
+- `paper_profile()` / `paper_profile_update(topics, keywords)` — research profile
+- `paper_sources_list()` / `paper_sources_enable(enable, disable)` — source management
+- `paper_templates_list()` — research area templates
+
+### Diagnostics
+- `paper_health()` — in-IDE health check (LLM config, profile, library, workspace)
+
+## Interaction Rules
+
+1. **Context carry-over** (CRITICAL): When the user's request relates to papers already found/discussed in this conversation:
+   - **Explicit reference** (e.g. "根据已有的", "用刚才的", "基于这些论文", "帮我把这些写成综述"): Use those papers directly. No confirmation needed. No re-search.
+   - **Ambiguous** (e.g. user says "写个 GNN 综述", and there are GNN papers in context): ASK "刚才找到了 N 篇 GNN 相关论文，直接用这些？还是再搜索补充？"
+   - **New topic** (e.g. context has GNN papers, user asks about "transformer 综述"): Treat as new search, ignore context.
+   - **No context**: Search directly, no extra question.
+2. **Intent-driven, not step-driven**: When the user's intent is clear (e.g. "根据已有的内容写综述"), skip all intermediate steps and go straight to results. Only ask clarifying questions when the intent is genuinely ambiguous. Intermediate steps (candidate listing, dimension selection, parameter tuning) are skipped unless the user's request lacks essential info.
+3. **Fork-only**: Only ask at genuine decision points (max 2-3 options). Before showing results, at most 2 rounds of clarification; after results, decisions are embedded in the output.
+4. **Smart defaults**: Prefer `paper_morning_brief` over 3 separate calls. Prefer `paper_quick_scan` over search+online+merge.
+5. **Auto-track, opt-in export**: Workspace operations (`paper_note_add`, `paper_reading_status`, `paper_group_add`) run automatically — these are internal tracking. File creation/export (Write tool) requires user confirmation. Each workflow's final FORK includes a save/export option.
+6. **Concise**: Max 3 options per question. Smart default + "或者？"
+7. **Persona**: Read `mode` from `paper_workspace_context()`. "workspace" → show progress, auto-mark. "lightweight" → just data.
+8. **Chinese** for all analysis and summaries.
+
+## Output Format
+
+### Tables First
+
+All paper lists MUST use tables, never bullet-point lists:
+
+| # | 标题 | 评分 | 关键词 | 一句话总结 |
+|---|------|------|--------|-----------|
+
+For comparisons, use dimension-based tables:
+
+| 维度 | 论文A | 论文B | 论文C |
+|------|-------|-------|-------|
+
+For trends, use year-based tables with direction arrows:
+
+| 子方向 | 2023 | 2024 | 2025 | 趋势 |
+|--------|------|------|------|------|
+
+### Conclusion Required
+
+Every workflow output MUST end with a **结论与建议** section BEFORE the FORK options. This section should contain:
+- **判断**: What does this data mean? (e.g. "这个方向正在从X转向Y", "论文A的方法在Z场景下明显优于B")
+- **建议**: What should the researcher do next? (e.g. "建议优先读第2和第5篇", "如果你关注X，A的方法更适合")
+
+Do NOT just present data — always tell the researcher "so what".
+
+### Format by Workflow
+
+| Workflow | Table format | Conclusion focus |
+|----------|-------------|-----------------|
+| daily-reading | 评分+关键词+一句话 | 今日最值得关注的方向和论文 |
+| search | 评分+关键词+一句话 | 搜索结果中的关键发现 |
+| deep-dive | 核心信息表+对比表 | 研究价值判断+与用户研究的关联 |
+| compare | 多维对比表 | 哪种方法在什么场景下最优 |
+| survey | 方法分类表+实验对比表 | 研究空白和趋势判断 |
+| triage | 三档分类表 | 为什么这几篇最重要 |
+| insight | 年度趋势表+子方向热度表 | 方向判断和时机建议 |
+| citation | 引用树+关键节点表 | 哪些是领域关键节点 |
+
+## First-Run Detection
+
+At session start, silently call `paper_profile()`:
+- **No profile**: Say "看起来你还没配置研究方向，我来帮你设置？告诉我你的研究方向就行。" Then guide through profile creation (same flow as /paper-setup). After saving, offer initial collection.
+- **Profile exists, empty library** (check `paper_stats()`): Say "研究方向已配好，论文库还是空的。要我帮你采集最近一周的论文吗？"
+- **Profile + library exist**: Normal operation. If user seems unsure what to do, suggest `/paper` to see all options.
+
+Note: The user's terminal setup flow is: `paper-agent init` (LLM config) → `paper-agent setup claude-code` (install to project) → start Claude Code. If something seems broken, call `paper_health()` to diagnose within this conversation (no need to leave Claude Code). For deeper terminal-level checks, the user can run `paper-agent doctor`.
+
+## Error Handling
+
+- `paper-agent init` not done (MCP connection fails): "paper-agent 还没有初始化。请先在终端运行 `paper-agent init` 配置 LLM。"
+- Search returns 0 results: "本地没找到相关论文，要在线搜索吗？" (suggest `paper_search_online`)
+- Online search/download fails: "在线搜索暂时不可用，可以先看本地库。" (don't show raw error)
+- Empty digest: "今天没有新论文，要搜一个主题看看？" (suggest `paper_quick_scan`)
 
 ## Workflow Skills
 
-paper-agent provides 6 interactive workflow skills. Each skill is a multi-phase
-process with interactive checkpoints where the AI MUST ask the user before
-proceeding.
+Detailed workflow definitions live in `.claude/skills/`. When handling a multi-step workflow, read the corresponding SKILL.md:
 
-| Skill | Trigger | Slash Command |
-|-------|---------|--------------|
-| **Daily Reading** | "start my day", "每日开工", "今天有什么新论文" | `/start-my-day` |
-| **Deep Dive** | "分析这篇论文", arXiv ID, "展开讲讲" | `/paper-analyze` |
-| **Literature Survey** | "综述", "survey", "这个方向有哪些工作" | `/paper-survey` |
-| **Citation Explore** | "引用链", "谁引用了它", "citations" | `/paper-compare` (citation mode) |
-| **Paper Triage** | "帮我筛一下", "哪些值得读", "triage" | `/paper-triage` |
-| **Research Insight** | "趋势", "洞察", "什么方法在兴起" | `/paper-insight` |
+| Workflow | Skill file | When to read |
+|----------|-----------|-------------|
+| Daily reading | `.claude/skills/daily-reading/SKILL.md` | /start-my-day or "今天看什么" |
+| Deep analysis | `.claude/skills/deep-dive/SKILL.md` | /paper-analyze or "分析这篇" |
+| Literature survey | `.claude/skills/literature-survey/SKILL.md` | /paper-survey or "综述" |
+| Citation trace | `.claude/skills/citation-explore/SKILL.md` | "引用链" or "谁引了" |
+| Paper triage | `.claude/skills/paper-triage/SKILL.md` | /paper-triage or "筛一下" |
+| Trend insight | `.claude/skills/research-insight/SKILL.md` | /paper-insight or "趋势" |
+| Intent routing | `.claude/skills/paper-intelligence/SKILL.md` | When unsure which workflow to use |
 
-### Interaction Rules
+For direct tool calls (morning_brief, auto_triage, citation_trace, quick_scan), no skill file is needed — just call the tool and present results.
 
-1. **Always ask at checkpoints**: Each skill has phases with explicit questions.
-   Never skip a checkpoint — always present options and wait for user response.
-2. **Suggest skill jumps**: At the end of each skill, suggest possible next
-   skills (e.g., after deep-dive, offer citation exploration).
-3. **Save deliverables**: Each skill ends by offering to save a structured
-   deliverable file (daily digest, analysis note, survey, etc.).
+## Commands
 
-## Custom Commands
-
-### Daily Workflow
-- `/start-my-day` — daily reading: context recovery → collect → digest → triage
-- `/paper-search <query>` — search the library
-- `/paper-analyze <paper_id>` — deep analysis with interactive angle selection
-- `/paper-collect [days]` — collect from arXiv + DBLP + S2
-- `/paper-setup` — guided profile creation through conversation
-
-### Multi-Paper Workflows (v02)
-- `/paper-compare` — compare multiple papers side by side
-- `/paper-survey <topic>` — generate literature survey with interactive refinement
-- `/paper-download <id>` — download PDF files from arXiv
-- `/paper-triage` — batch screening: filter → classify → mark reading status
-- `/paper-insight <topic>` — trend analysis: method evolution, hot topics, gaps
-
-## Output Conventions
-
-- Use **Chinese** for all paper analysis and summaries
-- Use `[[论文标题]]` wikilink format for knowledge base linking
-- Keep search results concise; expand only for deep analysis
-- After analysis, ask if user wants to save to file
-- After comparison, suggest writing a survey
-- Search results that include `suggestions` → follow them proactively
-
-## First-Time Setup
-
-```bash
-paper-agent init            # Configure LLM provider and API key (terminal only)
-```
-
-Then in Claude Code:
-```
-/paper-setup                # Create research profile via conversation
-```
+- `/paper` — **main entry point** (shows what you can do, routes to the right workflow)
+- `/start-my-day` — morning brief
+- `/paper-search <query>` — search
+- `/paper-analyze <id>` — deep analysis
+- `/paper-collect [days]` — collect
+- `/paper-setup` — profile creation
+- `/paper-compare` — compare papers
+- `/paper-survey <topic>` — literature survey
+- `/paper-download <id>` — download PDF
+- `/paper-triage` — batch screening
+- `/paper-insight <topic>` — trend analysis
 """
 
 _CLAUDE_COMMANDS: dict[str, str] = {
-    "start-my-day.md": """\
+    "paper.md": """\
 ---
-description: "Daily reading workflow: context recovery → collect → digest → triage"
+description: "Paper Agent — unified entry point for all research paper workflows"
 allowed-tools: [
-  "mcp__paper-agent__paper_workspace_context",
-  "mcp__paper-agent__paper_collect",
-  "mcp__paper-agent__paper_digest",
-  "mcp__paper-agent__paper_reading_status",
-  "mcp__paper-agent__paper_reading_stats",
+  "mcp__paper-agent__paper_profile",
+  "mcp__paper-agent__paper_profile_update",
   "mcp__paper-agent__paper_stats",
-  "mcp__paper-agent__paper_note_add"
+  "mcp__paper-agent__paper_workspace_context",
+  "mcp__paper-agent__paper_morning_brief",
+  "mcp__paper-agent__paper_quick_scan",
+  "mcp__paper-agent__paper_auto_triage",
+  "mcp__paper-agent__paper_search",
+  "mcp__paper-agent__paper_show",
+  "mcp__paper-agent__paper_batch_show",
+  "mcp__paper-agent__paper_citation_trace",
+  "mcp__paper-agent__paper_trend_data",
+  "mcp__paper-agent__paper_compare",
+  "mcp__paper-agent__paper_note_add",
+  "mcp__paper-agent__paper_reading_status",
+  "mcp__paper-agent__paper_collect",
+  "mcp__paper-agent__paper_download",
+  "mcp__paper-agent__paper_find_and_download",
+  "mcp__paper-agent__paper_export",
+  "mcp__paper-agent__paper_group_add",
+  "mcp__paper-agent__paper_sources_list",
+  "mcp__paper-agent__paper_sources_enable",
+  "mcp__paper-agent__paper_templates_list",
+  "mcp__paper-agent__paper_health",
+  "Read",
+  "Write"
 ]
 ---
 
-# Start My Day — 每日开工
+# Paper Agent
 
-完整的每日研究启动工作流，包含交互式检查点。
+Unified entry point — understand user state, recommend actions, and execute in the same turn.
 
-## Phase 1: 上下文恢复
+## Process
 
-1. Call `paper_workspace_context()` to get recent activity
-2. Present yesterday's progress summary
-3. **ASK THE USER**:
-   > 你昨天的进展如上。要：
-   > a) 先看昨天未完成的待读论文
-   > b) 直接收集今天的新论文
-   > c) 两个都要（推荐）
+1. Silently call `paper_workspace_context()` + `paper_stats()` to understand the current state
+2. Based on state, show **top 3 recommended actions** (not the full command list):
 
-## Phase 2: 采集新论文
+   **New user** (no profile):
+   > 看起来你是第一次用 Paper Agent！我先帮你设置研究方向，这样才能给你个性化的推荐。
+   > 告诉我你的研究领域和关注的方向？
 
-1. Call `paper_collect(days=1)` to fetch the latest papers
-2. Present source breakdown (arXiv / DBLP / S2)
+   **Empty library** (profile exists, 0 papers):
+   > 研究方向已配好，论文库还是空的。建议：
+   > 1. **今日推荐** — 收集并推荐最新论文（`/start-my-day`）
+   > 2. **搜索论文** — 搜一个你关注的主题
+   > 3. **采集论文** — 批量抓取最近一周的论文
 
-## Phase 3: 每日推荐
+   **Has unread papers** (to_read > 0):
+   > 你有 N 篇待读论文。建议：
+   > 1. **批量筛选** — 帮你自动分出最值得读的（`/paper-triage`）
+   > 2. **今日推荐** — 看看今天有没有新论文
+   > 3. **搜索论文** — 找特定方向的论文
+   >
+   > 输入"查看全部功能"展示完整命令列表。你也可以直接说你想做什么。
 
-1. Call `paper_digest()` to generate recommendations
-2. Present top picks with score and one-line reason
-3. **ASK THE USER**:
-   > 这 N 篇推荐中，要标记哪些为待读？（编号或"全部"）
-   > 有特别重要的吗？我可以标记为"重要"。
-4. Call `paper_reading_status(selected_ids, status)` to mark
+   **Returning user** (has reading history):
+   > 当前状态：库中 N 篇论文 | 待读 X | 阅读中 Y
+   > 建议：
+   > 1. **今日推荐** — 看看有没有新论文
+   > 2. **继续阅读** — 你有 Y 篇正在读
+   > 3. **文献综述** / **趋势分析** — 对某个方向做系统梳理
+   >
+   > 输入"查看全部功能"展示完整命令列表。你也可以直接说你想做什么。
 
-## Phase 4: 深入（可选）
+3. **If user says "查看全部功能" or "show all"**, then show the full table:
 
-**ASK THE USER**:
-> 要深入看哪篇？还是先干活了？
-> - 给我编号 → 切换到 deep-dive 模式
-> - "先干活" → 结束
+   | # | 功能 | 说明 | 命令 / 说法 |
+   |---|------|------|------------|
+   | 1 | 每日推荐 | 收集 + 推荐 | `/start-my-day` 或 "今天看什么" |
+   | 2 | 搜索论文 | 关键词搜索 | `/paper-search` 或 "搜一下 X" |
+   | 3 | 深度分析 | 单篇分析 | `/paper-analyze` 或 "分析这篇" |
+   | 4 | 文献综述 | 方向梳理 | `/paper-survey` 或 "综述" |
+   | 5 | 趋势分析 | 热度趋势 | `/paper-insight` 或 "这个方向火不火" |
+   | 6 | 批量筛选 | 自动分流 | `/paper-triage` 或 "筛一下" |
+   | 7 | 论文对比 | 横向对比 | `/paper-compare` 或 "对比这几篇" |
+   | 8 | 下载 PDF | 论文全文 | `/paper-download` 或给 arXiv ID |
+   | 9 | 引用追踪 | 引用网络 | "引用链" 或 "谁引了这篇" |
+   | 10 | 配置方向 | 设定 profile | `/paper-setup` |
+   | 11 | 采集论文 | 批量抓取 | `/paper-collect` |
+   | 12 | 健康检查 | 诊断安装 | "检查一下" 或 call `paper_health` |
 
-## Phase 5: 交付件
+4. **If user directly states intent** (e.g. "今天看什么", "搜 GNN 的论文"), skip the menu and **execute immediately** using the tools above. This is the key difference from a menu — /paper can route AND execute.
+5. For multi-step workflows, read `.claude/skills/<name>/SKILL.md` for the full flow.
+""",
+    "start-my-day.md": """\
+---
+description: One-call morning pipeline — context recovery, collect, digest, auto-mark
+allowed-tools: [
+  "mcp__paper-agent__paper_morning_brief",
+  "mcp__paper-agent__paper_show",
+  "Read"
+]
+---
 
-**ASK THE USER**:
-> 要保存今天的阅读摘要吗？默认：`daily/{date}.md`
+# Start My Day
+
+> Workflow detail: read `.claude/skills/daily-reading/SKILL.md` for full rules, edge cases, and output templates.
+
+Generate today's personalized paper digest in one call.
+
+## Process
+
+1. Call `paper_morning_brief(days=1)` — this single tool does context + collect + digest + auto-mark
+2. Present in Chinese with structured format:
+
+   **今日概览**: X 篇新论文，Y 篇高相关
+
+   | # | 标题 | 评分 | 关键词 | 一句话总结 |
+   |---|------|------|--------|-----------|
+
+   **结论与建议**: 今日论文主要聚焦于 [方向]，建议优先关注第 X 篇（[理由]）
+
+   If mode is "workspace": mention auto-marked papers
+3. **ASK**: "深入看哪篇？保存今日摘要？还是先这样？"
+4. If user picks a paper, call `paper_show(paper_id)` for details
+5. If user wants to save, write digest to `daily/{YYYY-MM-DD}.md`
 """,
     "paper-search.md": """\
 ---
@@ -489,9 +678,7 @@ description: Search the local paper library by keyword, topic, or method name
 argument-hint: <query>
 allowed-tools: [
   "mcp__paper-agent__paper_search",
-  "mcp__paper-agent__paper_show",
-  "mcp__paper-agent__paper_search_online",
-  "mcp__paper-agent__paper_find_and_download"
+  "mcp__paper-agent__paper_show"
 ]
 ---
 
@@ -505,69 +692,56 @@ Search the local paper library.
 2. Call `paper_search(query=$ARGUMENTS)` to search the library
 3. Present results as a concise list — each paper with title, score, and one-line summary
 4. If the user asks about a specific paper from the results, call `paper_show(paper_id)` for details
-5. If local results are insufficient, suggest online search or find-by-title
 
 ## Output Format
 
 找到 N 篇相关论文：
 
-| # | 标题 | 评分 | 摘要 |
-|---|------|------|------|
-| 1 | ... | 8.5 | ... |
+| # | 标题 | 评分 | 关键词 | 一句话总结 |
+|---|------|------|--------|-----------|
+| 1 | ... | 8.5 | GNN, placement | ... |
+
+**结论**: [搜索结果中的关键发现，如"这些论文主要分为X和Y两个方向"]
 
 需要查看某篇的详细信息吗？
 """,
     "paper-analyze.md": """\
 ---
-description: "Deep dive: structured analysis with interactive angle selection"
+description: Generate a structured deep-analysis note for a specific paper
 argument-hint: <paper_id or arxiv_id>
 allowed-tools: [
   "mcp__paper-agent__paper_show",
   "mcp__paper-agent__paper_search",
-  "mcp__paper-agent__paper_profile",
   "mcp__paper-agent__paper_note_add",
-  "mcp__paper-agent__paper_reading_status",
-  "mcp__paper-agent__paper_citations",
-  "mcp__paper-agent__paper_group_add",
-  "mcp__paper-agent__paper_find_and_download",
+  "Bash",
+  "Read",
   "Write"
 ]
 ---
 
-# Paper Analyze — 论文深度分析
+# Paper Analyze
 
-对单篇论文进行结构化深度分析，保存笔记，管理阅读状态。
+> Workflow detail: read `.claude/skills/deep-dive/SKILL.md` for full analysis template, fork rules, and edge cases.
 
-## Phase 1: 确认论文
+Generate a structured deep-analysis note for a paper.
 
-1. Parse $ARGUMENTS as paper_id
-2. Call `paper_show(paper_id)` to get details
-3. **ASK THE USER**:
-   > 要从哪些角度分析？
-   > a) 方法创新点  b) 实验设计  c) 与我研究的关联
-   > d) 局限与改进空间  e) 全部（推荐首次阅读）
+## Process
 
-## Phase 2: 生成分析
-
-1. Call `paper_profile()` to get user's research direction
-2. Generate analysis using selected angles
-3. For angle c), personalize based on user's profile
-
-## Phase 3: 保存与标记
-
-**ASK THE USER**:
-> 分析完成。接下来：
-> 1. 保存笔记吗？（默认保存到 `.paper-agent/notes/{paper_id}.md`）
-> 2. 标记为什么状态？reading / read / important
-
-Call `paper_note_add(paper_id, content, "ai_analysis")` and
-`paper_reading_status([paper_id], status)`.
-
-## Phase 4: 延伸（可选）
-
-**ASK THE USER**:
-> 要继续做什么？
-> a) 查引用链  b) 找相似论文  c) 加入分组  d) 对比  e) 结束
+1. **Resolve paper_id**: If $ARGUMENTS is a paper ID or arXiv ID, use it directly. If the user refers to a paper by index (e.g. "第3篇", "上面那篇"), resolve from papers discussed earlier in this conversation.
+2. Call `paper_show(paper_id)` to get full paper details
+3. If not found, try `paper_search(query=$ARGUMENTS)` and pick the best match
+4. Generate a structured analysis note in Chinese with these sections:
+   - **核心信息**: title, authors, venue, links
+   - **摘要翻译**: Chinese translation of the abstract
+   - **要点提炼**: 3 key contributions
+   - **研究背景与动机**: why this research matters
+   - **方法概述**: core idea, framework, key modules
+   - **实验结果**: main results + ablation studies
+   - **深度分析**: value, strengths, limitations, use cases (use table for strengths/limitations)
+   - **与相关论文对比**: comparison table (| 维度 | 本文 | 对比1 | 对比2 |)
+   - **结论与建议**: 研究价值判断 + 与用户研究方向的关联 + 值不值得深入跟进
+5. Auto-track: call `paper_note_add(paper_id, content, mark_as="reading")` to save to workspace
+6. **ASK**: "要导出分析笔记为文件？看引用链？还是先这样？"
 """,
     "paper-collect.md": """\
 ---
@@ -641,8 +815,6 @@ allowed-tools: [
   "mcp__paper-agent__paper_batch_show",
   "mcp__paper-agent__paper_compare",
   "mcp__paper-agent__paper_export",
-  "mcp__paper-agent__paper_group_create",
-  "mcp__paper-agent__paper_group_add",
   "Write"
 ]
 ---
@@ -653,71 +825,74 @@ Compare multiple papers on selected dimensions.
 
 ## Process
 
-1. If $ARGUMENTS contains paper IDs, use them directly
-2. Otherwise, ask the user which papers to compare
-   - Optionally search first: `paper_search(query)` to find candidates
-3. Ask which dimensions to compare:
-   - a) 方法架构  b) 实验结果  c) 适用场景  d) 全部
-4. Call `paper_compare(paper_ids, aspects)` to get structured comparison data
-5. Generate a comparison table in Chinese:
-   | 论文 | 方法 | 关键技术 | 主要结果 | 适用场景 |
-6. Provide analysis summary: which approach is best for what scenario
-7. Ask: "要保存对比表格吗？或者基于这些写 survey？"
-8. If save requested, write to file
-9. If export requested, call `paper_export(paper_ids, format="bibtex")`
+### Step 1 — Resolve papers
+
+- If $ARGUMENTS contains paper IDs → use them directly
+- **Explicit reference** ("对比刚才的", "这几篇对比一下") → use those papers directly
+- **Ambiguous** (papers in context, no explicit reference) → ASK "刚才找到的这几篇要对比吗？还是指定其他的？"
+- **No context, no IDs** → ask which papers to compare
+
+### Step 2 — Compare
+
+When papers are clear (from explicit reference or IDs), default to **全部维度** comparison. Don't ask "which dimensions" unless user specifies.
+
+Call `paper_compare(paper_ids, aspects)` and generate tables in Chinese:
+
+| 维度 | 论文A | 论文B | 论文C |
+|------|-------|-------|-------|
+| 方法 | ... | ... | ... |
+| 关键技术 | ... | ... | ... |
+| 主要结果 | ... | ... | ... |
+| 适用场景 | ... | ... | ... |
+
+**结论与建议**: 明确判断哪种方法在什么场景下最优，给出选型建议
+
+### Step 3 — After results
+
+ASK: "要保存对比表格吗？或者基于这些写 survey？"
 """,
     "paper-survey.md": """\
 ---
-description: "Literature survey: interactive keyword refinement → search → draft → iterate"
+description: Quick literature survey — one-call topic scan, then optional full survey
 argument-hint: <topic>
 allowed-tools: [
-  "mcp__paper-agent__paper_search",
-  "mcp__paper-agent__paper_search_batch",
-  "mcp__paper-agent__paper_search_online",
-  "mcp__paper-agent__paper_survey_collect",
+  "mcp__paper-agent__paper_quick_scan",
   "mcp__paper-agent__paper_batch_show",
   "mcp__paper-agent__paper_compare",
   "mcp__paper-agent__paper_export",
-  "mcp__paper-agent__paper_group_create",
   "mcp__paper-agent__paper_group_add",
+  "Read",
   "Write"
 ]
 ---
 
-# Paper Survey — 文献综述
+# Paper Survey
 
-从需求澄清到综述成文的完整流程，带交互式论文筛选和迭代修改。
+> Workflow detail: read `.claude/skills/literature-survey/SKILL.md` for full survey template, quick/full mode rules, and output format.
 
-## Phase 1: 需求澄清
+Quick-first literature survey.
 
-**ASK THE USER** (依次):
-1. 综述的主题是什么？
-2. 要覆盖哪些子方向？我帮你拆关键词。
-3. 时间范围？a) 1年  b) 3年  c) 5年  d) 自定义
-4. 拆分的关键词如下，覆盖够吗？要调整吗？
+## Process
 
-## Phase 2: 搜索论文
+### Step 1 — Resolve papers
 
-1. `paper_search_batch(queries, diverse=True)` or `paper_survey_collect`
-2. **ASK**: 本地结果够吗？要从 arXiv 在线补充吗？
-3. If yes: `paper_search_online(query)`
+- **Explicit reference** ("根据已有的", "用刚才的", "基于这些写综述"): use those papers directly. Go to Step 2 immediately — no candidate listing, no selection question.
+- **Ambiguous** (same topic in context): ASK "刚才找到了 N 篇相关论文，直接用这些？还是再补充搜索？"
+- **New search**: Call `paper_quick_scan(topic=$ARGUMENTS, limit=20)`, then show candidates as table and ASK "全部纳入还是选几篇？"
 
-## Phase 3: 论文筛选
+### Step 2 — Generate survey
 
-Present candidates and **ASK**: 要纳入综述的论文？编号 / "全选" / "前 N 篇"
+Generate survey narrative in Chinese with structured tables:
+- **方法分类表**: | 类别 | 代表论文 | 核心思路 | 优势 | 局限 |
+- **实验对比表**: | 论文 | 数据集 | 指标1 | 指标2 | 亮点 |
+- **研究空白与趋势**: open problems, emerging directions
+- **结论与建议**: 当前方向的成熟度判断、主流方法对比结论、研究机会在哪里
 
-## Phase 4: 综述生成
+### Step 3 — After results
 
-**ASK**: 包含哪些章节？关注什么维度？
-Generate draft using survey template.
+**ASK**: "要修改、补充、还是导出？（BibTeX / Markdown / 保存综述）"
 
-## Phase 5: 迭代
-
-**ASK**: 草稿完成。看看哪里需要修改？
-
-## Phase 6: 交付件
-
-**ASK**: 保存综述？导出 BibTeX？创建论文分组？
+Default is quick mode (20 candidates). Full mode (40+) only when user explicitly asks.
 """,
     "paper-download.md": """\
 ---
@@ -737,122 +912,87 @@ Download PDF files for one or more papers.
 
 ## Process
 
-1. Parse $ARGUMENTS as paper ID(s) or a search query
-2. If it looks like a paper ID (e.g., 2301.12345), download directly
-3. If it's a title, use `paper_find_and_download(title)` to search and download
+1. Parse $ARGUMENTS as paper ID(s), title, or a search query
+2. If it looks like a paper ID (e.g., 2301.12345), call `paper_download(paper_ids)`
+3. If it looks like a paper title, call `paper_find_and_download(title=$ARGUMENTS)`
 4. If it's a query, search first and ask which papers to download
-5. Call `paper_download(paper_ids)` to download PDFs
-6. Report results in Chinese:
-   - ✅ 已下载: filename, path
-   - ⏭️ 已存在: filename
-   - ❌ 失败: reason
-7. Ask: "要阅读哪篇？"
+5. Report results in Chinese
 """,
     "paper-triage.md": """\
 ---
-description: "Paper triage: batch screening → classify → mark reading status"
+description: Batch paper screening — auto-classify into important/to_read/skip
 allowed-tools: [
-  "mcp__paper-agent__paper_search",
-  "mcp__paper-agent__paper_digest",
-  "mcp__paper-agent__paper_batch_show",
-  "mcp__paper-agent__paper_profile",
+  "mcp__paper-agent__paper_auto_triage",
   "mcp__paper-agent__paper_reading_status",
-  "mcp__paper-agent__paper_group_create",
-  "mcp__paper-agent__paper_group_add",
-  "mcp__paper-agent__paper_group_list",
-  "Write"
+  "Read"
 ]
 ---
 
-# Paper Triage — 论文筛选分流
+# Paper Triage
 
-对一批论文进行快速筛选，按重要程度分流，批量标记状态。
+> Workflow detail: read `.claude/skills/paper-triage/SKILL.md` for classification rules, custom source handling, and save report format.
 
-## Phase 1: 确定范围
+Batch screening of papers using profile-based relevance scores.
 
-**ASK THE USER**:
-> 要筛选哪些论文？
-> a) 今日推荐的论文  b) 某次搜索的结果  c) 某个分组里的论文
-> d) 按关键词现搜一批  e) 给我一批 paper ID
+## Process
 
-## Phase 2: 筛选标准
+1. **Context carry-over**:
+   - If user explicitly references existing papers ("筛一下刚才的", "帮我筛这些"): triage those directly → `paper_auto_triage(paper_ids=[...])`
+   - If papers in context but reference is ambiguous: ASK "要筛选刚才找到的这些论文？还是筛选库里最近的未读论文？"
+   - If no context → default to `paper_auto_triage(top_n=5)`
+2. Present three buckets as tables:
 
-**ASK THE USER**:
-> 按什么标准筛选？
-> a) 跟我研究的相关度  b) 方法新颖性  c) 实验质量
-> d) 你帮我判断（推荐）  e) 自定义标准
->
-> 需要重点关注什么？
+   **⭐ 重要** (N 篇)
+   | # | 标题 | 评分 | 入选理由 |
+   |---|------|------|---------|
 
-## Phase 3: AI 筛选建议
+   **📖 待读** (N 篇)
+   | # | 标题 | 评分 | 简评 |
 
-1. Call `paper_profile()` for user's research direction
-2. Call `paper_batch_show(paper_ids)` for paper details
-3. Classify into: ⭐ 重要 / 📖 待读 / ⏭️ 跳过
-4. **ASK**: 同意这个分类吗？要调整哪些？
+   **⏭️ 跳过** (N 篇)
+   | # | 标题 | 评分 | 跳过理由 |
 
-## Phase 4: 执行操作
-
-1. `paper_reading_status(important_ids, "important")`
-2. `paper_reading_status(to_read_ids, "to_read")`
-3. **ASK**: 要把"重要"的论文加到某个分组吗？
-
-## Phase 5: 交付件
-
-**ASK**: 要保存筛选报告吗？默认：`triage/{topic}-{date}.md`
+   **结论**: 为什么这几篇最值得关注（关联用户 profile 说明）
+3. **ASK**: "这是按你 profile 的分类，同意吗？要调整哪些？"
+4. Apply status marks per user's confirmation/adjustment
+5. **ASK**: "已标记完成。要保存筛选报告？还是先这样？"
 """,
     "paper-insight.md": """\
 ---
-description: "Research insight: trend analysis, method evolution, hot topics, gaps"
-argument-hint: <topic or research direction>
+description: Research trend analysis — publication trends, sub-direction heat map
+argument-hint: <topic>
 allowed-tools: [
-  "mcp__paper-agent__paper_search",
-  "mcp__paper-agent__paper_search_batch",
-  "mcp__paper-agent__paper_search_online",
-  "mcp__paper-agent__paper_batch_show",
-  "mcp__paper-agent__paper_profile",
-  "mcp__paper-agent__paper_stats",
-  "mcp__paper-agent__paper_citations",
-  "mcp__paper-agent__paper_reading_status",
-  "mcp__paper-agent__paper_group_create",
-  "mcp__paper-agent__paper_group_add",
-  "Write"
+  "mcp__paper-agent__paper_quick_scan",
+  "mcp__paper-agent__paper_trend_data",
+  "Read"
 ]
 ---
 
-# Research Insight — 研究趋势洞察
+# Research Insight
 
-分析某个研究方向的趋势、演进、关键团队和研究空白。
+> Workflow detail: read `.claude/skills/research-insight/SKILL.md` for quick/full mode rules, trend table format, and export options.
 
-## Phase 1: 洞察范围
+Quick trend analysis for a research topic.
 
-**ASK THE USER** (依次):
-1. 你想了解哪些方向的趋势？
-2. 关注哪些会议/期刊？a) 通用 AI 顶会  b) EDA/硬件  c) 自定义  d) 不限
-3. 时间范围？a) 1年  b) 3年（推荐）  c) 5年  d) 自定义
-4. 你最关注什么？（可多选）
-   a) 方法演进趋势  b) 热门主题变化  c) 关键团队与人物
-   d) 研究空白与机会  e) 产业落地情况  f) 全部
+## Process
 
-## Phase 2: 数据收集
+1. Parse $ARGUMENTS as the topic
+2. **Context carry-over**:
+   - If user explicitly references existing papers ("根据刚才的", "用这些做趋势分析"): use those papers directly as landscape
+   - If papers in context on the same topic but reference is ambiguous: ASK "刚才找到了 N 篇相关论文，基于这些做趋势分析？还是重新搜索？"
+   - If no context → call `paper_quick_scan(topic=$ARGUMENTS, limit=20)` directly
+3. Call `paper_trend_data(topic=$ARGUMENTS, years_back=3)` for trend numbers
+4. Present as structured tables:
 
-1. `paper_search_batch(queries_by_year_and_direction, diverse=True)`
-2. `paper_search_online(query)` if needed
-3. **ASK**: 数据够做分析吗？要补充搜索吗？
+   **趋势总览**
+   | 子方向 | 2023 | 2024 | 2025 | 趋势 |
+   |--------|------|------|------|------|
 
-## Phase 3: 分析与呈现
+   **热门论文**
+   | # | 标题 | 年份 | 引用 | 一句话 |
+   |---|------|------|------|--------|
 
-Generate insight report expanding only user-selected dimensions.
-
-## Phase 4: 深入探索
-
-**ASK THE USER**:
-> 洞察报告草稿完成。你想：
-> a) 深入看某个趋势  b) 追踪某方法的引用链
-> c) 某方向做个综述  d) 修改报告  e) 满意，保存
-
-## Phase 5: 交付件
-
-**ASK**: 保存洞察报告？标记高影响力论文为"待读"？创建分组？
+   **结论与建议**: 这个方向整体趋势判断，哪些子方向在上升/下降，当前入场的时机建议
+5. **ASK**: "要深入某个子方向？导出分析报告？还是先这样？"
 """,
 }
