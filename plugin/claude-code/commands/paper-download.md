@@ -5,7 +5,8 @@ allowed-tools: [
   "mcp__paper-agent__paper_search",
   "mcp__paper-agent__paper_show",
   "mcp__paper-agent__paper_download",
-  "mcp__paper-agent__paper_find_and_download"
+  "mcp__paper-agent__paper_find_and_download",
+  "mcp__paper-agent__paper_parse"
 ]
 ---
 

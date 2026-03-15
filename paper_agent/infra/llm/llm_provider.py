@@ -11,6 +11,12 @@ from paper_agent.domain.models.paper import Paper
 
 
 class LLMProvider(ABC):
+    _storage: Any = None  # Set by AppContext for cache support
+
+    def set_storage(self, storage: Any) -> None:
+        """Inject storage for LLM response caching."""
+        self._storage = storage
+
     @abstractmethod
     def score_relevance(
         self, paper: Paper, interests: dict[str, Any]
@@ -32,6 +38,112 @@ class LLMProvider(ABC):
     @abstractmethod
     def synthesize(self, prompt: str) -> str:
         ...
+
+    def _cache_key(self, task_type: str, input_data: str) -> str:
+        """Generate a deterministic cache key."""
+        h = hashlib.sha256(input_data.encode()).hexdigest()[:16]
+        return f"{task_type}:{h}"
+
+    def _get_cached(self, task_type: str, input_data: str) -> str | None:
+        """Try to get a cached LLM response."""
+        if not self._storage:
+            return None
+        try:
+            key = self._cache_key(task_type, input_data)
+            return self._storage.get_llm_cache(key)
+        except Exception:
+            return None
+
+    def _set_cached(self, task_type: str, input_data: str, response: str) -> None:
+        """Cache an LLM response."""
+        if not self._storage:
+            return
+        try:
+            key = self._cache_key(task_type, input_data)
+            h = hashlib.sha256(input_data.encode()).hexdigest()[:16]
+            self._storage.set_llm_cache(
+                cache_key=key,
+                provider=self.__class__.__name__,
+                model="",
+                task_type=task_type,
+                input_hash=h,
+                response_json=response,
+            )
+        except Exception:
+            pass
+
+    # ── v04-experience: Batch scoring ──
+
+    def score_relevance_batch(
+        self, papers: list[Paper], interests: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Score multiple papers in a single LLM call.
+
+        Returns a list of dicts with the same keys as score_relevance().
+        Length of returned list equals len(papers).
+        On parse failure, returns default low scores for all papers.
+        Uses LLM cache when available.
+        """
+        # Check cache for each paper individually
+        topics_str = ", ".join(interests.get("topics", []))
+        keywords_str = ", ".join(interests.get("keywords", []))
+        cache_input = json.dumps([p.canonical_key or p.id for p in papers]) + topics_str + keywords_str
+        cached = self._get_cached("batch_score", cache_input)
+        if cached:
+            try:
+                results = json.loads(cached)
+                if isinstance(results, list) and len(results) == len(papers):
+                    return results
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        paper_blocks = []
+        for i, p in enumerate(papers, 1):
+            abstract_short = p.abstract[:400] if p.abstract else "(no abstract)"
+            paper_blocks.append(
+                f"Paper {i}:\n- Title: {p.title}\n- Abstract: {abstract_short}"
+            )
+
+        prompt = (
+            f"Evaluate each paper's relevance to the research interests below.\n\n"
+            f"Research interests:\n"
+            f"- Topics: {topics_str}\n"
+            f"- Keywords: {keywords_str}\n\n"
+            + "\n\n".join(paper_blocks)
+            + "\n\nReturn a JSON array with one object per paper, in order. "
+            f"Each object must have:\n"
+            f'- "score": float 0.0-10.0\n'
+            f'- "band": "high" if score >= 7.0, else "low"\n'
+            f'- "reason": brief explanation in Chinese (1-2 sentences)\n'
+            f'- "topics": list of topic tags\n\n'
+            f"Return ONLY the JSON array, no markdown."
+        )
+
+        raw = self.synthesize(prompt)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0]
+
+        try:
+            results = json.loads(raw)
+            if not isinstance(results, list) or len(results) != len(papers):
+                raise ValueError("batch result length mismatch")
+            out = []
+            for r in results:
+                score = float(r.get("score", 0))
+                out.append({
+                    "score": score,
+                    "band": "high" if score >= 7.0 else "low",
+                    "reason": r.get("reason", ""),
+                    "topics": r.get("topics", []),
+                })
+            self._set_cached("batch_score", cache_input, json.dumps(out))
+            return out
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return [
+                {"score": 0.0, "band": "low", "reason": "batch解析失败", "topics": []}
+                for _ in papers
+            ]
 
     # ── v04: Deep understanding methods ──
 

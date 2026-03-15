@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 from paper_agent.app.config_manager import ConfigProfile
 from paper_agent.domain.models.paper import Paper
@@ -96,9 +97,11 @@ class SearchEngine:
         self,
         storage: SQLiteStorage,
         profile: ConfigProfile | None = None,
+        feedback_manager: Any | None = None,
     ) -> None:
         self._storage = storage
         self._profile = profile
+        self._feedback_manager = feedback_manager
 
     def update_profile(self, profile: ConfigProfile) -> None:
         self._profile = profile
@@ -251,10 +254,18 @@ class SearchEngine:
         return sorted(papers, key=lambda p: p.relevance_score, reverse=True)
 
     def _rerank(self, papers: list[Paper]) -> list[Paper]:
-        """Re-score papers using profile topics/keywords + recency + LLM score."""
+        """Re-score papers using profile topics/keywords + recency + LLM score + feedback."""
         assert self._profile is not None
         profile_topics = {t.lower() for t in self._profile.topics}
         profile_keywords = {k.lower() for k in self._profile.keywords}
+
+        # Get feedback adjustments if available
+        feedback_weights: dict[str, float] = {}
+        if self._feedback_manager:
+            try:
+                feedback_weights = self._feedback_manager.get_adjusted_topic_weights()
+            except Exception:
+                pass
 
         scored: list[tuple[float, Paper]] = []
         for i, p in enumerate(papers):
@@ -272,12 +283,21 @@ class SearchEngine:
 
             llm_score = min(p.relevance_score / 10.0, 1.0) if p.relevance_score else 0.0
 
+            # Apply feedback offset (normalized to 0-1 range)
+            feedback_offset = 0.0
+            if feedback_weights:
+                for topic in p.topics:
+                    if topic.lower() in feedback_weights:
+                        feedback_offset += feedback_weights[topic.lower()]
+                feedback_offset = max(-0.2, min(0.2, feedback_offset))
+
             final = (
-                0.35 * fts_score
+                0.30 * fts_score
                 + 0.20 * topic_score
                 + 0.20 * kw_score
                 + 0.15 * llm_score
                 + 0.10 * recency_score
+                + 0.05 + feedback_offset  # base + feedback adjustment
             )
             scored.append((final, p))
 

@@ -4,6 +4,7 @@ argument-hint: [days_back]
 allowed-tools: [
   "mcp__paper-agent__paper_collect",
   "mcp__paper-agent__paper_stats",
+  "mcp__paper-agent__paper_watch_check",
   "mcp__paper-agent__paper_save_report"
 ]
 ---

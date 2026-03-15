@@ -3,7 +3,11 @@ description: Search the local paper library by keyword, topic, or method name
 argument-hint: <query>
 allowed-tools: [
   "mcp__paper-agent__paper_search",
+  "mcp__paper-agent__paper_search_batch",
+  "mcp__paper-agent__paper_search_online",
   "mcp__paper-agent__paper_show",
+  "mcp__paper-agent__paper_batch_show",
+  "mcp__paper-agent__paper_query",
   "mcp__paper-agent__paper_save_report"
 ]
 ---

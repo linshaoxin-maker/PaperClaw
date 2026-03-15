@@ -3,10 +3,18 @@ description: Quick literature survey — one-call topic scan, then optional full
 argument-hint: <topic>
 allowed-tools: [
   "mcp__paper-agent__paper_quick_scan",
+  "mcp__paper-agent__paper_search",
   "mcp__paper-agent__paper_batch_show",
   "mcp__paper-agent__paper_compare",
+  "mcp__paper-agent__paper_compare_table",
+  "mcp__paper-agent__paper_extract",
   "mcp__paper-agent__paper_export",
   "mcp__paper-agent__paper_group_add",
+  "mcp__paper-agent__paper_trend_data",
+  "mcp__paper-agent__paper_field_stats",
+  "mcp__paper-agent__paper_credibility",
+  "mcp__paper-agent__paper_credibility_batch",
+  "mcp__paper-agent__paper_survey_collect",
   "mcp__paper-agent__paper_save_report",
   "Read",
   "Write"

@@ -3,7 +3,9 @@ description: Batch paper screening — auto-classify into important/to_read/skip
 allowed-tools: [
   "mcp__paper-agent__paper_auto_triage",
   "mcp__paper-agent__paper_reading_status",
+  "mcp__paper-agent__paper_credibility_batch",
   "mcp__paper-agent__paper_save_report",
+  "mcp__paper-agent__paper_show",
   "Read"
 ]
 ---

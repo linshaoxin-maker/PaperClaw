@@ -12,7 +12,7 @@ from paper_agent.domain.models.paper import Paper
 from paper_agent.domain.models.digest import Digest, DigestStats
 from paper_agent.domain.models.collection import CollectionRecord
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS papers (
     metadata_json TEXT NOT NULL DEFAULT '{}',
     reading_status TEXT DEFAULT NULL,
     reading_status_at TEXT DEFAULT NULL,
+    citation_count INTEGER DEFAULT NULL,
+    doi TEXT DEFAULT NULL,
+    venue TEXT NOT NULL DEFAULT '',
+    pdf_url TEXT DEFAULT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -329,6 +333,15 @@ def _sanitize_fts_query(query: str) -> str:
     return " ".join(safe) if safe else query
 
 
+_V4_MIGRATION_SQL = """
+-- v04: promote high-frequency metadata fields to first-class columns
+ALTER TABLE papers ADD COLUMN citation_count INTEGER DEFAULT NULL;
+ALTER TABLE papers ADD COLUMN doi TEXT DEFAULT NULL;
+ALTER TABLE papers ADD COLUMN venue TEXT NOT NULL DEFAULT '';
+ALTER TABLE papers ADD COLUMN pdf_url TEXT DEFAULT NULL;
+"""
+
+
 def _quote_all_tokens(query: str) -> str:
     """Last-resort fallback: quote every token individually."""
     tokens = query.split()
@@ -361,6 +374,7 @@ class SQLiteStorage:
                 "INSERT INTO schema_version (version) VALUES (?)", (_SCHEMA_VERSION,)
             )
             self._migrate_to_v3()
+            self._migrate_to_v4()
             self.conn.commit()
         else:
             current = existing["version"]
@@ -368,6 +382,8 @@ class SQLiteStorage:
                 self._migrate_to_v2()
             if current < 3:
                 self._migrate_to_v3()
+            if current < 4:
+                self._migrate_to_v4()
             self.conn.commit()
 
     def _migrate_to_v2(self) -> None:
@@ -419,6 +435,70 @@ class SQLiteStorage:
             "UPDATE schema_version SET version = ?", (_SCHEMA_VERSION,)
         )
 
+    def _migrate_to_v4(self) -> None:
+        cols = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(papers)").fetchall()
+        }
+        new_cols = {
+            "citation_count": "INTEGER DEFAULT NULL",
+            "doi": "TEXT DEFAULT NULL",
+            "venue": "TEXT NOT NULL DEFAULT ''",
+            "pdf_url": "TEXT DEFAULT NULL",
+        }
+        for col_name, col_def in new_cols.items():
+            if col_name not in cols:
+                try:
+                    self.conn.execute(f"ALTER TABLE papers ADD COLUMN {col_name} {col_def}")
+                except sqlite3.OperationalError:
+                    pass
+        # Backfill from metadata_json for existing papers
+        rows = self.conn.execute(
+            "SELECT id, metadata_json FROM papers WHERE metadata_json != '{}'"
+        ).fetchall()
+        for row in rows:
+            try:
+                meta = json.loads(row["metadata_json"])
+                updates = {}
+                if meta.get("citation_count") or meta.get("citationCount"):
+                    updates["citation_count"] = meta.get("citation_count") or meta.get("citationCount")
+                if meta.get("doi"):
+                    updates["doi"] = meta["doi"]
+                if meta.get("venue"):
+                    updates["venue"] = meta["venue"]
+                if meta.get("pdf_url"):
+                    updates["pdf_url"] = meta["pdf_url"]
+                if updates:
+                    set_clause = ", ".join(f"{k} = ?" for k in updates)
+                    self.conn.execute(
+                        f"UPDATE papers SET {set_clause} WHERE id = ?",
+                        [*updates.values(), row["id"]],
+                    )
+            except (json.JSONDecodeError, TypeError):
+                pass
+        self.conn.execute(
+            "UPDATE schema_version SET version = ?", (_SCHEMA_VERSION,)
+        )
+        # Also add new columns to paper_profiles if they exist
+        try:
+            profile_cols = {
+                row[1]
+                for row in self.conn.execute("PRAGMA table_info(paper_profiles)").fetchall()
+            }
+            profile_new_cols = {
+                "novelty_claim": "TEXT NOT NULL DEFAULT ''",
+                "problem_formulation": "TEXT NOT NULL DEFAULT ''",
+                "key_contributions_json": "TEXT NOT NULL DEFAULT '[]'",
+            }
+            for col_name, col_def in profile_new_cols.items():
+                if col_name not in profile_cols:
+                    try:
+                        self.conn.execute(f"ALTER TABLE paper_profiles ADD COLUMN {col_name} {col_def}")
+                    except sqlite3.OperationalError:
+                        pass
+        except sqlite3.OperationalError:
+            pass  # paper_profiles table may not exist yet
+
     def close(self) -> None:
         if self._conn:
             self._conn.close()
@@ -433,8 +513,10 @@ class SQLiteStorage:
             (id, canonical_key, source_name, source_paper_id, title, abstract,
              authors_json, published_at, url, topics_json, methodology_tags_json,
              research_objectives_json, relevance_score, relevance_band,
-             recommendation_reason, lifecycle_state, metadata_json, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             recommendation_reason, lifecycle_state, metadata_json,
+             citation_count, doi, venue, pdf_url,
+             created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(canonical_key) DO UPDATE SET
                 relevance_score=excluded.relevance_score,
                 relevance_band=excluded.relevance_band,
@@ -443,6 +525,14 @@ class SQLiteStorage:
                 methodology_tags_json=excluded.methodology_tags_json,
                 research_objectives_json=excluded.research_objectives_json,
                 lifecycle_state=excluded.lifecycle_state,
+                -- Merge strategy: prefer non-empty values from new source
+                abstract=CASE WHEN length(excluded.abstract) > length(papers.abstract) THEN excluded.abstract ELSE papers.abstract END,
+                url=CASE WHEN excluded.url != '' AND papers.url = '' THEN excluded.url ELSE papers.url END,
+                metadata_json=excluded.metadata_json,
+                citation_count=COALESCE(excluded.citation_count, papers.citation_count),
+                doi=COALESCE(excluded.doi, papers.doi),
+                venue=CASE WHEN excluded.venue != '' THEN excluded.venue ELSE papers.venue END,
+                pdf_url=COALESCE(excluded.pdf_url, papers.pdf_url),
                 updated_at=excluded.updated_at
             """,
             (
@@ -463,6 +553,10 @@ class SQLiteStorage:
                 paper.recommendation_reason,
                 paper.lifecycle_state,
                 json.dumps(paper.metadata),
+                paper.citation_count,
+                paper.doi,
+                paper.venue,
+                paper.pdf_url,
                 now,
                 now,
             ),
@@ -801,8 +895,9 @@ class SQLiteStorage:
             """INSERT OR REPLACE INTO paper_profiles
             (paper_id, task, method_family, method_name, datasets_json, baselines_json,
              metrics_json, best_results_json, code_url, venue, compute_cost,
-             limitations_json, extracted_from, extracted_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             limitations_json, novelty_claim, problem_formulation, key_contributions_json,
+             extracted_from, extracted_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 profile.paper_id,
                 profile.task,
@@ -816,6 +911,9 @@ class SQLiteStorage:
                 profile.venue,
                 profile.compute_cost,
                 json.dumps(profile.limitations, ensure_ascii=False),
+                profile.novelty_claim,
+                profile.problem_formulation,
+                json.dumps(profile.key_contributions, ensure_ascii=False),
                 profile.extracted_from,
                 profile.extracted_at.isoformat() if profile.extracted_at else datetime.utcnow().isoformat(),
             ),
@@ -844,6 +942,9 @@ class SQLiteStorage:
             venue=row["venue"],
             compute_cost=row["compute_cost"],
             limitations=json.loads(row["limitations_json"]),
+            novelty_claim=row["novelty_claim"] if "novelty_claim" in row.keys() else "",
+            problem_formulation=row["problem_formulation"] if "problem_formulation" in row.keys() else "",
+            key_contributions=json.loads(row["key_contributions_json"]) if "key_contributions_json" in row.keys() and row["key_contributions_json"] else [],
             extracted_from=row["extracted_from"],
             extracted_at=datetime.fromisoformat(row["extracted_at"]),
         )
@@ -1055,6 +1156,45 @@ class SQLiteStorage:
             "updated_at": row["updated_at"],
         }
 
+    # ── LLM Cache ──
+
+    def get_llm_cache(self, cache_key: str) -> str | None:
+        """Get cached LLM response by key. Returns None if not found or expired."""
+        row = self.conn.execute(
+            "SELECT response_json, expires_at FROM llm_cache WHERE cache_key = ?",
+            (cache_key,),
+        ).fetchone()
+        if not row:
+            return None
+        if row["expires_at"]:
+            if datetime.fromisoformat(row["expires_at"]) < datetime.utcnow():
+                self.conn.execute("DELETE FROM llm_cache WHERE cache_key = ?", (cache_key,))
+                self.conn.commit()
+                return None
+        return row["response_json"]
+
+    def set_llm_cache(
+        self,
+        cache_key: str,
+        provider: str,
+        model: str,
+        task_type: str,
+        input_hash: str,
+        response_json: str,
+        ttl_hours: int = 168,
+    ) -> None:
+        """Cache an LLM response. Default TTL: 7 days."""
+        now = datetime.utcnow()
+        expires = now + __import__("datetime").timedelta(hours=ttl_hours)
+        self.conn.execute(
+            """INSERT OR REPLACE INTO llm_cache
+            (cache_key, provider, model, task_type, input_hash, response_json, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (cache_key, provider, model, task_type, input_hash, response_json,
+             now.isoformat(), expires.isoformat()),
+        )
+        self.conn.commit()
+
     # ── Internal ──
 
     def _row_to_paper(self, row: sqlite3.Row) -> Paper:
@@ -1082,6 +1222,10 @@ class SQLiteStorage:
             metadata=json.loads(row["metadata_json"]),
             reading_status=rs,
             reading_status_at=datetime.fromisoformat(rs_at) if rs_at else None,
+            citation_count=row["citation_count"] if "citation_count" in keys else None,
+            doi=row["doi"] if "doi" in keys else None,
+            venue=row["venue"] if "venue" in keys else "",
+            pdf_url=row["pdf_url"] if "pdf_url" in keys else None,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )

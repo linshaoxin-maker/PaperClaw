@@ -36,7 +36,19 @@ Apply the auto-triage result directly:
 
 After marking, **auto-save**: call `paper_save_report(report_type="triage", content=<report markdown>, filename="{topic}-{YYYY-MM-DD}.md")` using triage-template.
 
-**[FORK]** "已标记完成，筛选报告已保存至 {path}。要深入看哪篇？还是先这样？"
+**[CONTEXT-AWARE FORK]** — Based on the triage result, suggest next steps:
+
+- If important bucket has papers with PDFs available:
+  "已标记完成，筛选报告已保存至 {path}。\n💡 **下一步建议**：\n1. 批量下载 {N} 篇重要论文的 PDF\n2. 深入分析 [{top_important_title}]（{score}分）\n（说编号或告诉我你想做什么）"
+
+- If important bucket has papers but no PDFs:
+  "已标记完成，筛选报告已保存至 {path}。\n💡 **下一步建议**：\n1. 深入分析 [{top_important_title}]（{score}分）\n2. 搜索并下载这些论文的 PDF\n（说编号或告诉我你想做什么）"
+
+- If important bucket is empty but to_read has papers:
+  "没有特别突出的论文，但有 {N} 篇值得一读。\n💡 **下一步建议**：\n1. 看看 [{top_to_read_title}] — 评分最高的待读论文\n2. 换个方向搜索\n（说编号或告诉我你想做什么）"
+
+- If all papers are skip:
+  "这批论文跟你方向关联不大。\n💡 **下一步建议**：\n1. 调整 research profile — 可能关键词需要更新\n2. 换个方向搜索\n（说编号或告诉我你想做什么）"
 
 ## Custom source
 
@@ -50,3 +62,4 @@ If user provides specific paper IDs or says "筛这些":
 - Don't ask about source — default to recent unread papers.
 - Always use tables, never bullet-point lists for paper results.
 - Always include a 结论 section explaining why the classification matters.
+- FORK suggestions must reference actual paper titles and counts from the triage result.

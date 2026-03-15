@@ -12,11 +12,12 @@ from paper_agent.infra.storage.sqlite_storage import SQLiteStorage
 
 _TOP_VENUES = {
     "neurips", "nips", "icml", "iclr", "cvpr", "iccv", "eccv", "aaai", "ijcai",
-    "acl", "emnlp", "naacl", "sigir", "kdd", "www",
+    "acl", "emnlp", "naacl", "sigir", "kdd",
     "icse", "fse", "osdi", "sosp", "sigmod", "vldb",
-    "dac", "iccad", "date", "asp-dac", "ispd", "fpga",
+    "dac", "iccad", "date", "asp-dac", "ispd", "fpga", "www",
     "nature", "science", "cell", "pnas",
     "jmlr", "tpami", "tit", "tcad", "tse", "tosem",
+    "tmlr",  # Transactions on Machine Learning Research
 }
 
 _GOOD_VENUES = {
@@ -27,6 +28,12 @@ _GOOD_VENUES = {
     "isca", "micro", "hpca", "asplos",
     "glsvlsi", "islped",
     "aamas",
+    # EDA-specific journals
+    "todaes",  # ACM Trans. on Design Automation of Electronic Systems
+    "tcas",    # IEEE Trans. on Circuits and Systems
+    "integration",  # Integration, the VLSI Journal
+    "tvlsi",   # IEEE Trans. on VLSI Systems
+    "jetc",    # ACM Journal on Emerging Technologies in Computing
 }
 
 
@@ -36,14 +43,23 @@ def _classify_venue(venue: str) -> str:
     v_lower = venue.lower().strip()
     if "arxiv" in v_lower or "preprint" in v_lower:
         return "preprint"
+    # Workshop detection must come before top-venue check
+    # (e.g. "ICLR 2024 Workshop" should be workshop, not top)
     if "workshop" in v_lower:
         return "workshop"
+    # Use word-boundary-aware matching to avoid false positives
+    # e.g. "date" should match "DATE" conference, not "updated"
+    import re
     for top in _TOP_VENUES:
-        if top in v_lower:
+        # Match as whole word (case-insensitive)
+        if re.search(rf'\b{re.escape(top)}\b', v_lower):
             return "top"
     for good in _GOOD_VENUES:
-        if good in v_lower:
+        if re.search(rf'\b{re.escape(good)}\b', v_lower):
             return "good"
+    # Check for journal indicators
+    if any(kw in v_lower for kw in ("journal", "transactions", "letters")):
+        return "good"
     return "unknown"
 
 
@@ -51,6 +67,33 @@ class CredibilityAssessor:
     def __init__(self, storage: SQLiteStorage, llm: LLMProvider) -> None:
         self._storage = storage
         self._llm = llm
+
+    def quick_signals(self, paper: Paper) -> dict[str, Any]:
+        """Lightweight credibility signals from metadata only (no LLM call).
+
+        Returns venue_tier, code_available, citation_velocity for use in
+        filtering/digest without the cost of a full LLM assessment.
+        """
+        venue_str = paper.venue or paper.metadata.get("venue", "") or paper.source_name
+        venue_tier = _classify_venue(venue_str)
+        code_url = paper.metadata.get("code_url") or paper.metadata.get("github_url")
+        code_available = bool(code_url)
+        citation_count = paper.citation_count or paper.metadata.get("citation_count") or paper.metadata.get("citationCount")
+        citation_velocity = None
+        if citation_count and paper.published_at:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            pub = paper.published_at
+            if pub.tzinfo is None:
+                pub = pub.replace(tzinfo=timezone.utc)
+            months = max((now - pub).days / 30.0, 1.0)
+            citation_velocity = round(int(citation_count) / months, 2)
+        return {
+            "venue_tier": venue_tier,
+            "code_available": code_available,
+            "citation_count": citation_count,
+            "citation_velocity": citation_velocity,
+        }
 
     def assess(
         self,
@@ -63,7 +106,7 @@ class CredibilityAssessor:
             return existing
 
         # Venue classification
-        venue_str = paper.metadata.get("venue", "") or paper.source_name
+        venue_str = paper.venue or paper.metadata.get("venue", "") or paper.source_name
         venue_tier = _classify_venue(venue_str)
 
         # Code / citation from metadata or S2
