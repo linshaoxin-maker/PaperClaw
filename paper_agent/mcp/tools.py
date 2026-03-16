@@ -1586,7 +1586,8 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             except Exception:
                 errors += 1
 
-        # Rebuild dashboard after sync
+        # Rebuild dashboard and query pages after sync
+        ctx.workspace_manager.rebuild_query_pages()
         ctx.workspace_manager.rebuild_dashboard()
 
         return json.dumps({

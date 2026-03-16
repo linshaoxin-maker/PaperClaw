@@ -254,220 +254,269 @@ class WorkspaceManager:
         )
 
     def _init_query_pages(self) -> None:
-        """Generate pre-built Dataview query pages for common views."""
+        """Generate pre-built query pages. Static content + Dataview fallback."""
         vault_dir = self._root / "02-论文库"
         vault_dir.mkdir(exist_ok=True)
 
-        # MOC: By Method
-        (vault_dir / "_按方法分类.md").write_text("""# 📊 按方法分类
+        # These are placeholder pages; actual content is filled by rebuild_query_pages()
+        for fname, title in [
+            ("_按方法分类.md", "📊 按方法分类"),
+            ("_按年份分布.md", "📅 按年份分布"),
+            ("_按会议分类.md", "🏛️ 按会议分类"),
+            ("_最近入库.md", "🆕 最近入库"),
+            ("_高分论文.md", "⭐ 高分论文"),
+            ("_阅读进度.md", "📖 阅读进度"),
+        ]:
+            fp = vault_dir / fname
+            if not fp.exists():
+                fp.write_text(f"# {title}\n\n(同步论文后自动填充)\n", encoding="utf-8")
 
-```dataview
-TABLE length(rows) as "论文数"
-FROM "02-论文库"
-WHERE !startswith(file.name, "_")
-FLATTEN tags as tag
-WHERE startswith(tag, "method/")
-GROUP BY tag
-SORT length(rows) DESC
-```
-""", encoding="utf-8")
+    def rebuild_query_pages(self) -> None:
+        """Rebuild static query pages from database. Called after paper_sync_vault."""
+        if not self._storage or not self.is_initialized():
+            return
 
-        # MOC: By Year
-        (vault_dir / "_按年份分布.md").write_text("""# 📅 按年份分布
+        vault_dir = self._root / "02-论文库"
+        vault_dir.mkdir(exist_ok=True)
 
-```dataview
-TABLE length(rows) as "论文数"
-FROM "02-论文库"
-WHERE !startswith(file.name, "_")
-GROUP BY year
-SORT year DESC
-```
-""", encoding="utf-8")
+        papers = self._storage.conn.execute(
+            "SELECT id, title, source_paper_id, relevance_score, reading_status, "
+            "published_at, topics_json, source_name, venue FROM papers "
+            "ORDER BY relevance_score DESC"
+        ).fetchall()
 
-        # MOC: By Venue
-        (vault_dir / "_按会议分类.md").write_text("""# 🏛️ 按会议分类
+        # Helper: build wikilink from db row
+        def _link(row):
+            src = re.sub(r"[/\\:]", "_", (row["source_paper_id"] or "")).strip()
+            slug = re.sub(r"[^\w\s-]", "", row["title"])[:80].strip().replace(" ", "_")
+            fname = f"{src}_{slug}" if (src and src != row["id"]) else slug
+            return f"[[02-论文库/{fname}|{row['title'][:60]}]]"
 
-```dataview
-TABLE length(rows) as "论文数"
-FROM "02-论文库"
-WHERE !startswith(file.name, "_") AND venue != ""
-GROUP BY venue
-SORT length(rows) DESC
-```
-""", encoding="utf-8")
+        def _year(row):
+            pa = row["published_at"]
+            if not pa:
+                return "N/A"
+            return str(pa)[:4]
 
-        # MOC: Recent additions
-        (vault_dir / "_最近入库.md").write_text("""# 🆕 最近入库
+        def _topics(row):
+            t = row["topics_json"]
+            if not t:
+                return ""
+            # topics stored as JSON string or comma-separated
+            import json as _j
+            try:
+                lst = _j.loads(t) if t.startswith("[") else [x.strip() for x in t.split(",")]
+            except Exception:
+                lst = [t]
+            return ", ".join(lst[:3])
 
-```dataview
-TABLE first_author as "一作", year as "年份", score as "分数", status as "状态"
-FROM "02-论文库"
-WHERE !startswith(file.name, "_")
-SORT file.ctime DESC
-LIMIT 50
-```
-""", encoding="utf-8")
+        # ── 高分论文 ──
+        lines = ["# ⭐ 高分论文 (score ≥ 8)\n"]
+        lines.append("| 论文 | 一作 | 年份 | 分数 | 状态 |")
+        lines.append("|------|------|------|------|------|")
+        for p in papers:
+            if (p["relevance_score"] or 0) >= 8:
+                lines.append(
+                    f"| {_link(p)} | — | {_year(p)} | {p['relevance_score']} | {p['reading_status'] or 'unread'} |"
+                )
+        if len(lines) == 3:
+            lines.append("| (暂无 score ≥ 8 的论文) | | | | |")
+        (vault_dir / "_高分论文.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-        # MOC: High score
-        (vault_dir / "_高分论文.md").write_text("""# ⭐ 高分论文 (score ≥ 8)
+        # ── 按方法分类 ──
+        method_groups: dict[str, list] = {}
+        for p in papers:
+            for topic in (_topics(p) or "未分类").split(", "):
+                topic = topic.strip() or "未分类"
+                method_groups.setdefault(topic, []).append(p)
+        lines = ["# 📊 按方法/主题分类\n"]
+        for method, plist in sorted(method_groups.items(), key=lambda x: -len(x[1])):
+            lines.append(f"## {method} ({len(plist)} 篇)\n")
+            for p in plist[:20]:
+                lines.append(f"- {_link(p)} (score: {p['relevance_score'] or 0})")
+            if len(plist) > 20:
+                lines.append(f"- ... 还有 {len(plist) - 20} 篇")
+            lines.append("")
+        (vault_dir / "_按方法分类.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-```dataview
-TABLE first_author as "一作", year as "年份", score as "分数", venue as "会议", status as "状态"
-FROM "02-论文库"
-WHERE !startswith(file.name, "_") AND score >= 8
-SORT score DESC
-```
-""", encoding="utf-8")
+        # ── 按年份分布 ──
+        year_groups: dict[str, list] = {}
+        for p in papers:
+            y = _year(p)
+            year_groups.setdefault(y, []).append(p)
+        lines = ["# 📅 按年份分布\n"]
+        lines.append("| 年份 | 论文数 |")
+        lines.append("|------|--------|")
+        for y in sorted(year_groups.keys(), reverse=True):
+            lines.append(f"| {y} | {len(year_groups[y])} |")
+        lines.append("")
+        for y in sorted(year_groups.keys(), reverse=True):
+            lines.append(f"## {y} ({len(year_groups[y])} 篇)\n")
+            for p in year_groups[y][:15]:
+                lines.append(f"- {_link(p)} (score: {p['relevance_score'] or 0})")
+            if len(year_groups[y]) > 15:
+                lines.append(f"- ... 还有 {len(year_groups[y]) - 15} 篇")
+            lines.append("")
+        (vault_dir / "_按年份分布.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-        # MOC: Reading progress
-        (vault_dir / "_阅读进度.md").write_text("""# 📖 阅读进度
+        # ── 按会议分类 ──
+        # venue info is in topics for some sources
+        lines = ["# 🏛️ 按来源分类\n"]
+        source_groups: dict[str, list] = {}
+        for p in papers:
+            src = p["source_name"] or "unknown"
+            source_groups.setdefault(src, []).append(p)
+        for src, plist in sorted(source_groups.items(), key=lambda x: -len(x[1])):
+            lines.append(f"## {src} ({len(plist)} 篇)\n")
+            for p in plist[:15]:
+                lines.append(f"- {_link(p)} (score: {p['relevance_score'] or 0}, {_year(p)})")
+            if len(plist) > 15:
+                lines.append(f"- ... 还有 {len(plist) - 15} 篇")
+            lines.append("")
+        (vault_dir / "_按会议分类.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-## ⭐ 重要
-```dataview
-TABLE first_author as "一作", score as "分数"
-FROM "02-论文库"
-WHERE status = "important"
-SORT score DESC
-```
+        # ── 最近入库 ──
+        recent = papers[:50]  # already sorted by score, re-sort by date
+        recent_sorted = sorted(recent, key=lambda p: p["published_at"] or "", reverse=True)
+        lines = ["# 🆕 最近入库 (Top 50)\n"]
+        lines.append("| 论文 | 年份 | 分数 | 来源 |")
+        lines.append("|------|------|------|------|")
+        for p in recent_sorted:
+            lines.append(f"| {_link(p)} | {_year(p)} | {p['relevance_score'] or 0} | {p['source_name'] or ''} |")
+        (vault_dir / "_最近入库.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-## 📖 阅读中
-```dataview
-TABLE first_author as "一作", score as "分数"
-FROM "02-论文库"
-WHERE status = "reading"
-SORT score DESC
-```
-
-## 📋 待读
-```dataview
-TABLE first_author as "一作", score as "分数"
-FROM "02-论文库"
-WHERE status = "to_read"
-SORT score DESC
-LIMIT 30
-```
-
-## ✅ 已读
-```dataview
-TABLE first_author as "一作", score as "分数"
-FROM "02-论文库"
-WHERE status = "read"
-SORT score DESC
-```
-""", encoding="utf-8")
+        # ── 阅读进度 ──
+        status_groups: dict[str, list] = {"important": [], "reading": [], "to_read": [], "read": [], "unread": []}
+        for p in papers:
+            s = p["reading_status"] or "unread"
+            status_groups.setdefault(s, []).append(p)
+        display = {
+            "important": "⭐ 重要",
+            "reading": "📖 阅读中",
+            "to_read": "📋 待读",
+            "read": "✅ 已读",
+            "unread": "📥 未读",
+        }
+        lines = ["# 📖 阅读进度\n"]
+        lines.append("| 状态 | 数量 |")
+        lines.append("|------|------|")
+        for key, label in display.items():
+            lines.append(f"| {label} | {len(status_groups.get(key, []))} |")
+        lines.append("")
+        for key, label in display.items():
+            plist = status_groups.get(key, [])
+            if not plist:
+                continue
+            lines.append(f"## {label} ({len(plist)} 篇)\n")
+            for p in plist[:30]:
+                lines.append(f"- {_link(p)} (score: {p['relevance_score'] or 0})")
+            if len(plist) > 30:
+                lines.append(f"- ... 还有 {len(plist) - 30} 篇")
+            lines.append("")
+        (vault_dir / "_阅读进度.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     # ── Dashboard ──
 
     def rebuild_dashboard(self) -> None:
-        """Regenerate 00-Dashboard.md with Dataview dynamic queries."""
+        """Regenerate 00-Dashboard.md with static content from database."""
         if not self.is_initialized():
             return
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        content = f"""# 📊 Research Dashboard
+        lines = [
+            "# 📊 Research Dashboard\n",
+            f"> Last updated: {now}",
+            "> 此文件由 paper-agent 自动生成\n",
+        ]
 
-> Last updated: {now}
-> 此文件由 paper-agent 自动生成
+        # Stats from DB
+        if self._storage:
+            stats = self._storage.get_reading_stats()
+            total = stats.get("total", 0)
+            to_read = stats.get("to_read", 0)
+            reading = stats.get("reading", 0)
+            read = stats.get("read", 0)
+            important = stats.get("important", 0)
 
-## 📈 论文库概览
+            lines.append("## 📈 论文库概览\n")
+            lines.append(f"| 总计 | 待读 | 阅读中 | 已读 | ⭐重要 |")
+            lines.append(f"|------|------|--------|------|--------|")
+            lines.append(f"| {total} | {to_read} | {reading} | {read} | {important} |\n")
 
-```dataview
-TABLE WITHOUT ID
-  length(rows) as "总计"
-FROM "02-论文库"
-```
+        # Link to query pages
+        lines.append("## 📂 快速导航\n")
+        lines.append("- [[02-论文库/_高分论文|⭐ 高分论文]]")
+        lines.append("- [[02-论文库/_按方法分类|📊 按方法分类]]")
+        lines.append("- [[02-论文库/_按年份分布|📅 按年份分布]]")
+        lines.append("- [[02-论文库/_按会议分类|🏛️ 按来源分类]]")
+        lines.append("- [[02-论文库/_最近入库|🆕 最近入库]]")
+        lines.append("- [[02-论文库/_阅读进度|📖 阅读进度]]")
+        lines.append("- [[阅读清单|📋 阅读清单]]")
+        lines.append("- [[研究日志|📝 研究日志]]")
+        lines.append("")
 
-```dataview
-TABLE WITHOUT ID
-  status as "状态",
-  length(rows) as "数量"
-FROM "02-论文库"
-GROUP BY status
-SORT length(rows) DESC
-```
+        # List reports from each directory
+        report_dirs = {
+            "01-每日推荐": "📅 每日推荐",
+            "05-文献综述": "📚 文献综述",
+            "04-对比分析": "⚖️ 对比分析",
+            "03-深度分析": "📝 深度分析",
+            "06-趋势洞察": "📊 趋势洞察",
+            "07-阅读包": "📦 阅读包",
+            "08-研究Ideas": "💡 研究 Ideas",
+            "09-实验计划": "🧪 实验计划",
+            "10-引用追踪": "🔗 引用追踪",
+            "12-搜索结果": "🔍 搜索结果",
+            "13-筛选报告": "📋 筛选报告",
+        }
+        has_reports = False
+        for subdir, label in report_dirs.items():
+            d = self._root / subdir
+            if d.is_dir():
+                files = sorted(
+                    [f for f in d.glob("*.md") if not f.name.startswith("_")],
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if files:
+                    if not has_reports:
+                        lines.append("## 📄 研究报告\n")
+                        has_reports = True
+                    lines.append(f"### {label} ({len(files)} 份)\n")
+                    for f in files[:5]:
+                        lines.append(f"- [[{subdir}/{f.stem}]]")
+                    if len(files) > 5:
+                        lines.append(f"- ... 还有 {len(files) - 5} 份")
+                    lines.append("")
 
-## ⭐ 高分论文 (score ≥ 8)
+        # Collections
+        if self._storage:
+            groups = self._storage.list_groups()
+            if groups:
+                lines.append("## 📁 论文分组\n")
+                for g in groups:
+                    safe = re.sub(r"[^\w\-]", "_", g["name"])
+                    lines.append(
+                        f"- [[11-论文分组/{safe}|{g['name']}]] "
+                        f"({g.get('paper_count', 0)} 篇)"
+                    )
+                lines.append("")
 
-```dataview
-TABLE first_author as "一作", year as "年份", score as "分数", venue as "会议"
-FROM "02-论文库"
-WHERE score >= 8
-SORT score DESC
-LIMIT 20
-```
+        # Journal recent
+        journal_path = self._root / self.JOURNAL_FILE
+        if journal_path.exists():
+            text = journal_path.read_text(encoding="utf-8")
+            entries = re.findall(r"^### (.+)", text, re.MULTILINE)
+            if entries:
+                lines.append("## 🕐 最近活动\n")
+                for e in entries[:8]:
+                    lines.append(f"- {e}")
+                lines.append("")
 
-## 📖 正在阅读
+        lines.append("---\n")
+        lines.append("*此文件由 paper-agent 自动生成，请勿手动编辑。*\n")
 
-```dataview
-TABLE first_author as "一作", score as "分数"
-FROM "02-论文库"
-WHERE status = "reading" OR status = "important"
-SORT score DESC
-```
-
-## 📅 最近推荐
-
-```dataview
-LIST
-FROM "01-每日推荐"
-SORT file.name DESC
-LIMIT 7
-```
-
-## 📚 文献综述
-
-```dataview
-LIST
-FROM "05-文献综述"
-SORT file.mtime DESC
-```
-
-## ⚖️ 对比分析
-
-```dataview
-LIST
-FROM "04-对比分析"
-SORT file.mtime DESC
-```
-
-## 📝 深度分析
-
-```dataview
-LIST
-FROM "03-深度分析"
-SORT file.mtime DESC
-LIMIT 10
-```
-
-## 🔗 引用追踪
-
-```dataview
-LIST
-FROM "10-引用追踪"
-SORT file.mtime DESC
-```
-
-## 💡 研究 Ideas
-
-```dataview
-LIST
-FROM "08-研究Ideas"
-SORT file.mtime DESC
-```
-
----
-
-> 💡 推荐安装以下 Obsidian 插件获得最佳体验：
-> 1. **Dataview** — 动态表格和查询（Dashboard 和查询页需要）
-> 2. **Calendar** — 日历视图，按日期浏览每日推荐
->
-> 安装方式：设置 → 第三方插件 → 关闭安全模式 → 浏览 → 搜索插件名 → 安装并启用
->
-> **Graph View** 是 Obsidian 自带功能，点左侧栏的图标或 `Cmd+G` 打开，
-> 可以看到所有论文之间的引用关系网络。
-"""
-
-        (self._root / self.DASHBOARD_FILE).write_text(content, encoding="utf-8")
+        (self._root / self.DASHBOARD_FILE).write_text("\n".join(lines), encoding="utf-8")
 
     # ── Journal ──
 
