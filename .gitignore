@@ -16,6 +16,7 @@ build/
 .idea/
 docs/
 .paper-agent/
+.cursor/
 
 
 docs/
