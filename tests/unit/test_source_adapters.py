@@ -291,10 +291,19 @@ class TestOpenReviewAdapterParsing:
         p = self._parse()
         assert _extract_arxiv_id(p) == ""
 
-    def test_pdf_url_is_none(self):
+    def test_pdf_url_uses_openreview(self):
+        """OpenReview papers have a PDF URL via openreview.net/pdf."""
         p = self._parse()
+        # OpenReview adapter sets pdf_url in metadata
+        meta = p.metadata or {}
+        assert meta.get("pdf_url") or p.url  # has either pdf_url or forum url
+        # _build_pdf_url falls back to metadata.pdf_url
         url = _build_pdf_url(p)
-        assert url is None
+        # openreview papers have pdf_url in metadata
+        if meta.get("pdf_url"):
+            assert url == meta["pdf_url"]
+        else:
+            assert url is None
 
     def test_filename_clean(self):
         p = self._parse()

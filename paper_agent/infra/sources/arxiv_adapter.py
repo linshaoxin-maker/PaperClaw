@@ -213,6 +213,7 @@ class ArxivAdapter(SourceAdapter):
 
         # Extract additional arXiv metadata
         pdf_url = ""
+        url = f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else ""
         for link_el in entry.findall(f"{ATOM_NS}link"):
             if link_el.get("title") == "pdf":
                 pdf_url = link_el.get("href", "")

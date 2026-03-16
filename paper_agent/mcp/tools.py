@@ -108,39 +108,54 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         queries: list[str],
         limit_per_query: int = 20,
         diverse: bool = False,
+        page: int = 1,
+        page_size: int = 10,
     ) -> str:
-        """Search for multiple topics/directions at once. Returns results grouped by query.
+        """Search for multiple topics/directions at once. Returns compact results grouped by query.
 
         Use this instead of calling paper_search repeatedly when:
         - The user wants to survey multiple research directions
         - The user asks "compare these N topics" or "each direction pick M papers"
         - You need papers from several keyword groups for a literature survey
 
-        Each query is searched independently; a failure in one query does NOT
-        affect the others.
+        Returns COMPACT format (title + first author + year + 120-char snippet) to
+        keep response size small. Use paper_get(id) for full abstract/metadata on
+        specific papers of interest.
 
         Args:
-            queries: List of search queries (one per topic/direction).
-            limit_per_query: Max papers to return per query (default 20).
+            queries: List of search queries (one per topic/direction). Max 20 queries.
+            limit_per_query: Max papers per query (default 20, max 30).
             diverse: If True, auto-expand keywords via synonyms for each query.
+            page: Page number for paginating across queries (default 1).
+            page_size: Number of queries per page (default 10, max 20).
 
         Returns:
-            JSON object with results grouped by query, plus aggregate totals.
+            JSON with compact paper list grouped by query, plus pagination info.
         """
+        # Guard rails to prevent token explosion
+        queries = queries[:20]
+        limit_per_query = min(limit_per_query, 30)
+        page_size = min(page_size, 20)
+
+        # Paginate queries
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_queries = queries[start:end]
+        total_pages = max(1, -(-len(queries) // page_size))  # ceil division
+
         groups: list[dict[str, Any]] = []
         total_papers = 0
         seen_ids: set[str] = set()  # Cross-query dedup
-        for q in queries:
+        for q in page_queries:
             try:
                 result = ctx.search_engine.search(q, limit=limit_per_query, diverse=diverse)
                 papers = []
                 for p in result.papers:
                     if p.id not in seen_ids:
                         seen_ids.add(p.id)
-                        papers.append(p.to_summary_dict())
+                        papers.append(p.to_batch_dict())
                 groups.append({
                     "query": q,
-                    "status": result.status,
                     "count": len(papers),
                     "papers": papers,
                 })
@@ -148,16 +163,22 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             except Exception as e:
                 groups.append({
                     "query": q,
-                    "status": "error",
                     "count": 0,
                     "papers": [],
                     "error": str(e),
                 })
+
+        note = "Compact format. Use paper_get(id) for full details."
+        if total_pages > 1:
+            note += f" Page {page}/{total_pages} — call with page={page + 1} for next batch."
+
         return json.dumps({
-            "status": "completed",
-            "total_queries": len(queries),
-            "total_papers": total_papers,
             "groups": groups,
+            "total_papers": total_papers,
+            "page": page,
+            "total_pages": total_pages,
+            "total_queries": len(queries),
+            "note": note,
         }, ensure_ascii=False, default=str)
 
     @mcp.tool()

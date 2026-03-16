@@ -71,6 +71,31 @@ class CollectionManager:
         elif self._debug and self._debug_log is not None:
             self._debug_log(message)
 
+    @staticmethod
+    def _expand_keywords(keywords: list[str], max_total: int = 30) -> list[str]:
+        """Expand a keyword list with synonyms from the search engine synonym table.
+
+        For each keyword, if it appears in a synonym group, all other terms in
+        that group are added. Deduplicates and caps at max_total to avoid
+        over-querying downstream APIs.
+        """
+        from paper_agent.services.search_engine import _SYNONYM_GROUPS  # noqa: PLC0415
+
+        expanded: list[str] = list(keywords)
+        seen = {k.lower() for k in keywords}
+
+        for kw in keywords:
+            kw_lower = kw.lower()
+            for group in _SYNONYM_GROUPS:
+                group_lower = [t.lower() for t in group]
+                if kw_lower in group_lower:
+                    for term in group:
+                        if term.lower() not in seen:
+                            expanded.append(term)
+                            seen.add(term.lower())
+
+        return expanded[:max_total]
+
     # ── Smart multi-source collection (six-way) ──
 
     def collect_from_sources(
@@ -153,14 +178,16 @@ class CollectionManager:
 
             if conf_sources and profile and (profile.topics or profile.keywords):
                 venue_names = [s.display_name for s in conf_sources]
-                keywords = (profile.topics or []) + (profile.keywords or [])
+                keywords = self._expand_keywords((profile.topics or []) + (profile.keywords or []))
+                self._log(f"S2 expanded keywords ({len(keywords)}): {keywords[:10]}")
                 futures[executor.submit(
                     self._collect_s2, keywords, venue_names, since, max_results
                 )] = "semantic_scholar"
 
             if profile and (profile.topics or profile.keywords):
-                keywords = (profile.topics or []) + (profile.keywords or [])
+                keywords = self._expand_keywords((profile.topics or []) + (profile.keywords or []))
                 venue_names = [s.display_name for s in conf_sources] if conf_sources else []
+                self._log(f"OpenAlex expanded keywords ({len(keywords)}): {keywords[:10]}")
                 futures[executor.submit(
                     self._collect_openalex, keywords, venue_names, since, max_results
                 )] = "openalex"

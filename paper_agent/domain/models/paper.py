@@ -63,6 +63,29 @@ class Paper:
             "source_paper_id": self.source_paper_id,
         }
 
+    def to_batch_dict(self) -> dict[str, Any]:
+        """Ultra-compact format for batch search results — minimises token usage.
+
+        Only the fields an LLM needs to decide relevance: id, title, first author,
+        year, venue, and a 120-char abstract snippet.
+        """
+        snippet = ""
+        if self.abstract:
+            snippet = self.abstract[:120].rstrip() + ("…" if len(self.abstract) > 120 else "")
+        year = self.published_at.year if self.published_at else None
+        first_author = self.authors[0] if self.authors else ""
+        meta = self.metadata or {}
+        return {
+            "id": self.id,
+            "title": self.title,
+            "author": first_author,
+            "year": year,
+            "venue": self.venue or meta.get("venue", ""),
+            "snippet": snippet,
+            "score": round(self.relevance_score, 2) if self.relevance_score else None,
+            "url": self.url,
+        }
+
     def to_compact_dict(self) -> dict[str, Any]:
         """Mid-level detail: enough for survey/compare, without raw noise."""
         abstract_short = self.abstract[:300] + "..." if len(self.abstract) > 300 else self.abstract
