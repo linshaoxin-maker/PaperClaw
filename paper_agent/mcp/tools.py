@@ -97,6 +97,19 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                     if profile.task:
                         tags.append(f"task/{profile.task.replace(' ', '-')}")
 
+                # Look up groups
+                paper_groups: list[str] = []
+                try:
+                    grp_rows = ctx.storage.conn.execute(
+                        "SELECT pg.name FROM paper_groups pg "
+                        "JOIN paper_group_items pgi ON pg.id = pgi.group_id "
+                        "WHERE pgi.paper_id = ?",
+                        (paper.id,),
+                    ).fetchall()
+                    paper_groups = [r[0] for r in grp_rows]
+                except Exception:
+                    pass
+
                 lines = [
                     "---",
                     f'title: "{paper.title}"',
@@ -109,6 +122,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                     f"url: {paper.url}",
                     f"arxiv_id: \"{paper.source_paper_id or ''}\"",
                     f"tags: [{', '.join(tags)}]",
+                    f"groups: [{', '.join(paper_groups)}]",
                     f"date: {paper.published_at.strftime('%Y-%m-%d') if paper.published_at else ''}",
                     "---",
                     "",
@@ -1430,17 +1444,18 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         paper_ids = [r["id"] for r in rows]
 
         # Build a lookup for wikilinks: paper_id → filename
-        all_rows = ctx.storage.conn.execute("SELECT id, source_paper_id, title FROM papers").fetchall()
+        all_rows = ctx.storage.conn.execute("SELECT id, source_paper_id, title, published_at FROM papers").fetchall()
         id_to_filename: dict[str, str] = {}
         for r in all_rows:
             pid = r["id"]
-            src_id = r["source_paper_id"] or ""
-            src_id = re.sub(r"[/\\:]", "_", src_id).strip()
             t_slug = re.sub(r"[^\w\s-]", "", r["title"])[:80].strip().replace(" ", "_")
-            if src_id and src_id != pid:
-                id_to_filename[pid] = f"{src_id}_{t_slug}"
-            else:
-                id_to_filename[pid] = t_slug
+            date_str = ""
+            if r["published_at"]:
+                try:
+                    date_str = f"_{r['published_at'][:10]}"
+                except Exception:
+                    pass
+            id_to_filename[pid] = (t_slug or pid[:12]) + date_str
 
         created = 0
         skipped = 0
@@ -1483,7 +1498,19 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                     if profile.task:
                         tags.append(f"task/{profile.task.replace(' ', '-')}")
 
-                # Frontmatter
+                # Frontmatter — look up groups for this paper
+                paper_groups: list[str] = []
+                try:
+                    grp_rows = ctx.storage.conn.execute(
+                        "SELECT pg.name FROM paper_groups pg "
+                        "JOIN paper_group_items pgi ON pg.id = pgi.group_id "
+                        "WHERE pgi.paper_id = ?",
+                        (paper.id,),
+                    ).fetchall()
+                    paper_groups = [r[0] for r in grp_rows]
+                except Exception:
+                    pass
+
                 lines = [
                     "---",
                     f'title: "{paper.title}"',
@@ -1497,6 +1524,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                     f"url: {paper.url}",
                     f"arxiv_id: \"{paper.source_paper_id or ''}\"",
                     f"tags: [{', '.join(tags)}]",
+                    f"groups: [{', '.join(paper_groups)}]",
                     f"date: {paper.published_at.strftime('%Y-%m-%d') if paper.published_at else ''}",
                     "---",
                     "",

@@ -254,46 +254,182 @@ class WorkspaceManager:
         )
 
     def _init_query_pages(self) -> None:
-        """Generate pre-built Dataview query pages for common views."""
+        """Generate pre-built Dataview query pages: stats overview + grouped paper lists."""
         vault_dir = self._root / "02-论文库"
         vault_dir.mkdir(exist_ok=True)
 
-        (vault_dir / "_按方法分类.md").write_text("""# 📊 按方法分类
+        # ── Collect actual categories from database for grouped display ──
+        topics: list[str] = []
+        sources: list[str] = []
+        try:
+            rows = self._storage.conn.execute(
+                "SELECT DISTINCT topics_json FROM papers WHERE topics_json IS NOT NULL AND topics_json != '[]'"
+            ).fetchall()
+            topic_set: set[str] = set()
+            import json as _j
+            for r in rows:
+                try:
+                    for t in _j.loads(r[0]):
+                        topic_set.add(t)
+                except Exception:
+                    pass
+            topics = sorted(topic_set)
 
-```dataview
-TABLE first_author as "一作", year as "年份", score as "分数"
-FROM "02-论文库"
-WHERE !startswith(file.name, "_")
-FLATTEN tags as tag
-WHERE startswith(tag, "topic/")
-SORT tag ASC, score DESC
-```
-""", encoding="utf-8")
+            src_rows = self._storage.conn.execute(
+                "SELECT DISTINCT source_name FROM papers WHERE source_name IS NOT NULL"
+            ).fetchall()
+            sources = sorted(set(r[0] for r in src_rows if r[0]))
+        except Exception:
+            pass
 
-        (vault_dir / "_按年份分布.md").write_text("""# 📅 按年份分布
+        # ── 按方法分类 ──
+        lines = [
+            "# 📊 按方法分类\n",
+            "## 统计概览",
+            "```dataview",
+            'TABLE length(rows) as "论文数"',
+            'FROM "02-论文库"',
+            'WHERE !startswith(file.name, "_")',
+            "FLATTEN tags as tag",
+            'WHERE startswith(tag, "topic/")',
+            "GROUP BY tag",
+            "SORT length(rows) DESC",
+            "```",
+            "",
+        ]
+        if topics:
+            for topic in topics:
+                tag_val = f"topic/{topic.replace(' ', '-')}"
+                lines.append(f"## {topic}")
+                lines.append("```dataview")
+                lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+                lines.append('FROM "02-论文库"')
+                lines.append('WHERE !startswith(file.name, "_")')
+                lines.append(f'WHERE contains(tags, "{tag_val}")')
+                lines.append("SORT date DESC")
+                lines.append("```")
+                lines.append("")
+        else:
+            lines.append("## 论文列表")
+            lines.append("```dataview")
+            lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+            lines.append('FROM "02-论文库"')
+            lines.append('WHERE !startswith(file.name, "_")')
+            lines.append("SORT date DESC")
+            lines.append("```")
+            lines.append("")
+        (vault_dir / "_按方法分类.md").write_text("\n".join(lines), encoding="utf-8")
 
-```dataview
-TABLE first_author as "一作", score as "分数", status as "状态"
-FROM "02-论文库"
-WHERE !startswith(file.name, "_")
-SORT year DESC, score DESC
-```
-""", encoding="utf-8")
+        # ── 按年份分布 ──
+        years: list[int] = []
+        try:
+            yr_rows = self._storage.conn.execute(
+                "SELECT DISTINCT CAST(strftime('%Y', published_at) AS INTEGER) as y "
+                "FROM papers WHERE published_at IS NOT NULL ORDER BY y DESC"
+            ).fetchall()
+            years = [r[0] for r in yr_rows if r[0]]
+        except Exception:
+            years = [2026, 2025, 2024, 2023]
 
-        (vault_dir / "_按会议分类.md").write_text("""# 🏛️ 按来源分类
+        lines = [
+            "# 📅 按年份分布\n",
+            "## 统计概览",
+            "```dataview",
+            'TABLE length(rows) as "论文数"',
+            'FROM "02-论文库"',
+            'WHERE !startswith(file.name, "_")',
+            "GROUP BY year",
+            "SORT year DESC",
+            "```",
+            "",
+        ]
+        for y in years:
+            lines.append(f"## {y}")
+            lines.append("```dataview")
+            lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+            lines.append('FROM "02-论文库"')
+            lines.append(f'WHERE !startswith(file.name, "_") AND year = {y}')
+            lines.append("SORT date DESC")
+            lines.append("```")
+            lines.append("")
+        (vault_dir / "_按年份分布.md").write_text("\n".join(lines), encoding="utf-8")
 
-```dataview
-TABLE first_author as "一作", year as "年份", score as "分数"
-FROM "02-论文库"
-WHERE !startswith(file.name, "_")
-SORT source ASC, score DESC
-```
-""", encoding="utf-8")
+        # ── 按来源分类 ──
+        lines = [
+            "# 🏛️ 按来源分类\n",
+            "## 统计概览",
+            "```dataview",
+            'TABLE length(rows) as "论文数"',
+            'FROM "02-论文库"',
+            'WHERE !startswith(file.name, "_")',
+            "GROUP BY source",
+            "SORT length(rows) DESC",
+            "```",
+            "",
+        ]
+        if sources:
+            for src in sources:
+                lines.append(f"## {src}")
+                lines.append("```dataview")
+                lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+                lines.append('FROM "02-论文库"')
+                lines.append(f'WHERE !startswith(file.name, "_") AND source = "{src}"')
+                lines.append("SORT date DESC")
+                lines.append("```")
+                lines.append("")
+        else:
+            lines.append("## 论文列表")
+            lines.append("```dataview")
+            lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+            lines.append('FROM "02-论文库"')
+            lines.append('WHERE !startswith(file.name, "_")')
+            lines.append("SORT date DESC")
+            lines.append("```")
+            lines.append("")
+        (vault_dir / "_按会议分类.md").write_text("\n".join(lines), encoding="utf-8")
+
+        # ── 按分组分类 ──
+        groups: list[dict] = []
+        try:
+            groups = self._storage.list_groups()
+        except Exception:
+            pass
+
+        lines = [
+            "# 📂 按分组分类\n",
+            "## 统计概览",
+            "```dataview",
+            'TABLE length(rows) as "论文数"',
+            'FROM "02-论文库"',
+            'WHERE !startswith(file.name, "_") AND groups',
+            "FLATTEN groups as grp",
+            "GROUP BY grp",
+            "SORT length(rows) DESC",
+            "```",
+            "",
+        ]
+        if groups:
+            for g in groups:
+                gname = g["name"]
+                lines.append(f"## {gname}")
+                if g.get("description"):
+                    lines.append(f"> {g['description']}\n")
+                lines.append("```dataview")
+                lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+                lines.append('FROM "02-论文库"')
+                lines.append(f'WHERE !startswith(file.name, "_") AND contains(groups, "{gname}")')
+                lines.append("SORT date DESC")
+                lines.append("```")
+                lines.append("")
+        else:
+            lines.append('> 暂无分组。对 Claude 说"帮我创建论文分组"即可。')
+            lines.append("")
+        (vault_dir / "_按分组分类.md").write_text("\n".join(lines), encoding="utf-8")
 
         (vault_dir / "_最近入库.md").write_text("""# 🆕 最近入库
 
 ```dataview
-TABLE first_author as "一作", year as "年份", score as "分数", source as "来源"
+TABLE first_author as "一作", date as "日期", score as "分数", source as "来源"
 FROM "02-论文库"
 WHERE !startswith(file.name, "_")
 SORT file.ctime DESC
@@ -304,7 +440,7 @@ LIMIT 50
         (vault_dir / "_高分论文.md").write_text("""# ⭐ 高分论文
 
 ```dataview
-TABLE first_author as "一作", year as "年份", score as "分数", status as "状态"
+TABLE first_author as "一作", date as "日期", score as "分数", status as "状态"
 FROM "02-论文库"
 WHERE !startswith(file.name, "_") AND score > 0
 SORT score DESC
@@ -315,9 +451,18 @@ SORT score DESC
 
         (vault_dir / "_阅读进度.md").write_text("""# 📖 阅读进度
 
+## 统计概览
+```dataview
+TABLE length(rows) as "论文数"
+FROM "02-论文库"
+WHERE !startswith(file.name, "_")
+GROUP BY status
+SORT length(rows) DESC
+```
+
 ## ⭐ 重要
 ```dataview
-TABLE first_author as "一作", score as "分数"
+TABLE first_author as "一作", date as "日期", score as "分数"
 FROM "02-论文库"
 WHERE status = "important"
 SORT score DESC
@@ -325,7 +470,7 @@ SORT score DESC
 
 ## 📖 阅读中
 ```dataview
-TABLE first_author as "一作", score as "分数"
+TABLE first_author as "一作", date as "日期", score as "分数"
 FROM "02-论文库"
 WHERE status = "reading"
 SORT score DESC
@@ -333,7 +478,7 @@ SORT score DESC
 
 ## 📋 待读
 ```dataview
-TABLE first_author as "一作", score as "分数"
+TABLE first_author as "一作", date as "日期", score as "分数"
 FROM "02-论文库"
 WHERE status = "to_read"
 SORT score DESC
@@ -341,7 +486,7 @@ SORT score DESC
 
 ## ✅ 已读
 ```dataview
-TABLE first_author as "一作", score as "分数"
+TABLE first_author as "一作", date as "日期", score as "分数"
 FROM "02-论文库"
 WHERE status = "read"
 SORT score DESC
@@ -349,10 +494,10 @@ SORT score DESC
 
 ## 📥 全部论文
 ```dataview
-TABLE first_author as "一作", year as "年份", score as "分数", status as "状态"
+TABLE first_author as "一作", date as "日期", score as "分数", status as "状态"
 FROM "02-论文库"
 WHERE !startswith(file.name, "_")
-SORT score DESC
+SORT date DESC
 ```
 """, encoding="utf-8")
 
@@ -503,42 +648,33 @@ SORT score DESC
     # ── Dashboard ──
 
     def rebuild_dashboard(self) -> None:
-        """Regenerate 00-Dashboard.md with static content from database."""
+        """Regenerate 00-Dashboard.md with Dataview queries for real-time stats."""
         if not self.is_initialized():
             return
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
         lines = [
             "# 📊 Research Dashboard\n",
-            f"> Last updated: {now}",
-            "> 此文件由 paper-agent 自动生成\n",
+            "> 此文件由 paper-agent 自动生成，数据由 Dataview 实时查询\n",
+            "## 📈 论文库概览\n",
+            "```dataview",
+            'TABLE length(rows) as "论文数"',
+            'FROM "02-论文库"',
+            'WHERE !startswith(file.name, "_")',
+            "GROUP BY status",
+            "SORT length(rows) DESC",
+            "```\n",
+            "## 📂 快速导航\n",
+            "- [[02-论文库/_高分论文|⭐ 高分论文]]",
+            "- [[02-论文库/_按方法分类|📊 按方法分类]]",
+            "- [[02-论文库/_按年份分布|📅 按年份分布]]",
+            "- [[02-论文库/_按会议分类|🏛️ 按来源分类]]",
+            "- [[02-论文库/_按分组分类|📂 按分组分类]]",
+            "- [[02-论文库/_最近入库|🆕 最近入库]]",
+            "- [[02-论文库/_阅读进度|📖 阅读进度]]",
+            "- [[阅读清单|📋 阅读清单]]",
+            "- [[研究日志|📝 研究日志]]",
+            "",
         ]
-
-        # Stats from DB
-        if self._storage:
-            stats = self._storage.get_reading_stats()
-            total = stats.get("total", 0)
-            to_read = stats.get("to_read", 0)
-            reading = stats.get("reading", 0)
-            read = stats.get("read", 0)
-            important = stats.get("important", 0)
-
-            lines.append("## 📈 论文库概览\n")
-            lines.append(f"| 总计 | 待读 | 阅读中 | 已读 | ⭐重要 |")
-            lines.append(f"|------|------|--------|------|--------|")
-            lines.append(f"| {total} | {to_read} | {reading} | {read} | {important} |\n")
-
-        # Link to query pages
-        lines.append("## 📂 快速导航\n")
-        lines.append("- [[02-论文库/_高分论文|⭐ 高分论文]]")
-        lines.append("- [[02-论文库/_按方法分类|📊 按方法分类]]")
-        lines.append("- [[02-论文库/_按年份分布|📅 按年份分布]]")
-        lines.append("- [[02-论文库/_按会议分类|🏛️ 按来源分类]]")
-        lines.append("- [[02-论文库/_最近入库|🆕 最近入库]]")
-        lines.append("- [[02-论文库/_阅读进度|📖 阅读进度]]")
-        lines.append("- [[阅读清单|📋 阅读清单]]")
-        lines.append("- [[研究日志|📝 研究日志]]")
-        lines.append("")
 
         # List reports from each directory
         report_dirs = {
@@ -574,18 +710,17 @@ SORT score DESC
                         lines.append(f"- ... 还有 {len(files) - 5} 份")
                     lines.append("")
 
-        # Collections
-        if self._storage:
-            groups = self._storage.list_groups()
-            if groups:
-                lines.append("## 📁 论文分组\n")
-                for g in groups:
-                    safe = re.sub(r"[^\w\-]", "_", g["name"])
-                    lines.append(
-                        f"- [[11-论文分组/{safe}|{g['name']}]] "
-                        f"({g.get('paper_count', 0)} 篇)"
-                    )
-                lines.append("")
+        # Collections — Dataview query for real-time group list
+        lines.append("## 📁 论文分组\n")
+        lines.append("```dataview")
+        lines.append('TABLE length(rows) as "论文数"')
+        lines.append('FROM "02-论文库"')
+        lines.append('WHERE !startswith(file.name, "_") AND groups')
+        lines.append("FLATTEN groups as grp")
+        lines.append("GROUP BY grp")
+        lines.append("SORT length(rows) DESC")
+        lines.append("```")
+        lines.append("")
 
         # Journal recent
         journal_path = self._root / self.JOURNAL_FILE
@@ -994,13 +1129,15 @@ SORT score DESC
 
     @staticmethod
     def _paper_filename(paper) -> str:  # type: ignore[no-untyped-def]
-        """Generate a readable filename for a paper (without .md extension)."""
-        arxiv_id = getattr(paper, "source_paper_id", "") or ""
-        arxiv_id = re.sub(r"[/\\:]", "_", arxiv_id).strip()
+        """Generate a clean, human-readable filename for a paper (without .md).
+
+        Format: Title_Slug_YYYY-MM-DD
+        """
         title_slug = re.sub(r"[^\w\s-]", "", paper.title)[:80].strip().replace(" ", "_")
-        if arxiv_id and arxiv_id != paper.id:
-            return f"{arxiv_id}_{title_slug}"
-        return title_slug
+        date_str = ""
+        if paper.published_at:
+            date_str = f"_{paper.published_at.strftime('%Y-%m-%d')}"
+        return (title_slug or paper.id[:12]) + date_str
 
     def paper_wikilink(self, paper) -> str:  # type: ignore[no-untyped-def]
         """Return an Obsidian wikilink string for a paper: [[02-论文库/filename|title]]."""
