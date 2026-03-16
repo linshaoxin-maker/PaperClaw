@@ -261,42 +261,39 @@ class WorkspaceManager:
         (vault_dir / "_按方法分类.md").write_text("""# 📊 按方法分类
 
 ```dataview
-TABLE length(rows) as "论文数"
+TABLE first_author as "一作", year as "年份", score as "分数"
 FROM "02-论文库"
 WHERE !startswith(file.name, "_")
 FLATTEN tags as tag
 WHERE startswith(tag, "topic/")
-GROUP BY tag
-SORT length(rows) DESC
+SORT tag ASC, score DESC
 ```
 """, encoding="utf-8")
 
         (vault_dir / "_按年份分布.md").write_text("""# 📅 按年份分布
 
 ```dataview
-TABLE length(rows) as "论文数"
+TABLE first_author as "一作", score as "分数", status as "状态"
 FROM "02-论文库"
 WHERE !startswith(file.name, "_")
-GROUP BY year
-SORT year DESC
+SORT year DESC, score DESC
 ```
 """, encoding="utf-8")
 
         (vault_dir / "_按会议分类.md").write_text("""# 🏛️ 按来源分类
 
 ```dataview
-TABLE length(rows) as "论文数"
+TABLE first_author as "一作", year as "年份", score as "分数"
 FROM "02-论文库"
 WHERE !startswith(file.name, "_")
-GROUP BY source
-SORT length(rows) DESC
+SORT source ASC, score DESC
 ```
 """, encoding="utf-8")
 
         (vault_dir / "_最近入库.md").write_text("""# 🆕 最近入库
 
 ```dataview
-TABLE first_author as "一作", year as "年份", score as "分数", status as "状态"
+TABLE first_author as "一作", year as "年份", score as "分数", source as "来源"
 FROM "02-论文库"
 WHERE !startswith(file.name, "_")
 SORT file.ctime DESC
@@ -304,17 +301,16 @@ LIMIT 50
 ```
 """, encoding="utf-8")
 
-        (vault_dir / "_高分论文.md").write_text("""# ⭐ 高分论文 (score ≥ 8)
+        (vault_dir / "_高分论文.md").write_text("""# ⭐ 高分论文
 
 ```dataview
 TABLE first_author as "一作", year as "年份", score as "分数", status as "状态"
 FROM "02-论文库"
-WHERE !startswith(file.name, "_") AND score >= 8
+WHERE !startswith(file.name, "_") AND score > 0
 SORT score DESC
 ```
 
-> 💡 论文 score 由 `paper_digest` 或 `paper_auto_triage` 流程打分。
-> 如果全部为 0，说明这些论文还没经过评分。对 Claude 说"帮我给论文打分"即可。
+> 💡 score 为 0 的论文还没经过评分。对 Claude 说"帮我给论文打分"即可。
 """, encoding="utf-8")
 
         (vault_dir / "_阅读进度.md").write_text("""# 📖 阅读进度
@@ -341,7 +337,6 @@ TABLE first_author as "一作", score as "分数"
 FROM "02-论文库"
 WHERE status = "to_read"
 SORT score DESC
-LIMIT 30
 ```
 
 ## ✅ 已读
@@ -349,6 +344,14 @@ LIMIT 30
 TABLE first_author as "一作", score as "分数"
 FROM "02-论文库"
 WHERE status = "read"
+SORT score DESC
+```
+
+## 📥 全部论文
+```dataview
+TABLE first_author as "一作", year as "年份", score as "分数", status as "状态"
+FROM "02-论文库"
+WHERE !startswith(file.name, "_")
 SORT score DESC
 ```
 """, encoding="utf-8")

@@ -128,15 +128,12 @@ Unified entry point — understand user state, recommend actions, and execute in
 
 所有输出件自动同步到 `.paper-agent/` 目录，用 Obsidian 打开即可浏览。
 
-**首次设置**：
-1. 用 Obsidian 打开 `.paper-agent/` 目录作为 vault（`Cmd+Shift+G` 输入路径）
-2. 安装 **Dataview** 和 **Calendar** 插件（设置 → 第三方插件 → 浏览）
-3. 对 Claude 说"同步论文到 Obsidian"（调用 `paper_sync_vault`）
+**重要**：Obsidian vault 路径就是 `.paper-agent/` 目录。**永远不要问用户 vault 路径**。
+`paper_sync_vault` 不需要任何路径参数，自动写入 `.paper-agent/02-论文库/`。
 
 **日常使用**：
-- 每次 Claude 生成报告（每日推荐/综述/对比/分析），Obsidian 自动更新
-- `00-Dashboard.md` — 动态仪表盘（Dataview 查询）
-- `02-论文库/_高分论文.md` — 高分论文列表
-- `02-论文库/_按方法分类.md` — 按方法分组
+- 调用 `paper_sync_vault` 同步论文到 Obsidian（不需要传路径）
+- 每次 `paper_save_report` 时传 `paper_ids`，涉及的论文自动同步
+- `00-Dashboard.md` — 仪表盘
+- `02-论文库/` — 所有论文卡片 + Dataview 查询页
 - Graph View (`Cmd+G`) — 论文引用关系图谱
-- Calendar 视图 — 按日期浏览每日推荐

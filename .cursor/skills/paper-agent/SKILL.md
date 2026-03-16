@@ -234,8 +234,12 @@ Then in IDE, say "配置研究方向" → AI will guide profile setup via conver
 
 ### Obsidian Setup (optional but recommended)
 
-1. 用 Obsidian 打开 `.paper-agent/` 目录作为 vault（`Cmd+Shift+G` 输入路径）
-2. 安装 **Dataview** 和 **Calendar** 插件（设置 → 第三方插件 → 浏览）
-3. 对 Claude 说"同步论文到 Obsidian"（调用 `paper_sync_vault`）
-4. 打开 `00-Dashboard.md` 查看动态仪表盘
-5. 打开 Graph View (`Cmd+G`) 查看论文关联图谱
+Obsidian vault 路径就是 `.paper-agent/` 目录（即 `~/.paper-agent/`），**不需要问用户 vault 路径**。
+`paper_sync_vault` 工具会自动把论文写入 `.paper-agent/02-论文库/`，不需要任何额外路径参数。
+
+1. 用 Obsidian 打开 `~/.paper-agent/` 目录作为 vault
+2. 安装 **Dataview** 和 **Calendar** 插件
+3. 调用 `paper_sync_vault` 同步论文（不需要传 vault 路径）
+4. 打开 `00-Dashboard.md` 查看仪表盘
+
+**重要**：永远不要问用户 Obsidian vault 路径。vault 就是 `.paper-agent/` 目录，已经自动处理。
