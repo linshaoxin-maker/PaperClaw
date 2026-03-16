@@ -64,6 +64,9 @@ Resources:
   paper://stats         Library stats snapshot
   paper://profile       Research profile
   paper://recent        Recent papers (7 days)
+
+Tools (v08 — Obsidian integration):
+  paper_sync_vault     Sync papers from DB to vault/ as Obsidian markdown files
 """
 
 

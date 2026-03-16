@@ -13,10 +13,26 @@ from paper_agent.domain.exceptions import (
     ConfigurationValidationError,
 )
 
-DEFAULT_DATA_DIR = Path.home() / ".paper-agent"
-DEFAULT_CONFIG_PATH = DEFAULT_DATA_DIR / "config.yaml"
-DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "library.db"
-DEFAULT_ARTIFACTS_DIR = DEFAULT_DATA_DIR / "artifacts"
+def _resolve_data_dir() -> Path:
+    """Resolve the default data directory.
+
+    Priority:
+      1. $PAPER_AGENT_DATA_DIR environment variable
+      2. cwd/.paper-agent  (project-local)
+    """
+    import os
+
+    env = os.environ.get("PAPER_AGENT_DATA_DIR")
+    if env:
+        return Path(env)
+
+    return Path.cwd() / ".paper-agent"
+
+
+DEFAULT_DATA_DIR = _resolve_data_dir()
+DEFAULT_CONFIG_PATH = DEFAULT_DATA_DIR / ".data" / "config.yaml"
+DEFAULT_DB_PATH = DEFAULT_DATA_DIR / ".data" / "library.db"
+DEFAULT_ARTIFACTS_DIR = DEFAULT_DATA_DIR / ".data" / "artifacts"
 
 
 @dataclass
@@ -69,7 +85,18 @@ class ConfigProfile:
 
 class ConfigManager:
     def __init__(self, config_path: str | Path | None = None) -> None:
-        self._config_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
+        if config_path:
+            self._config_path = Path(config_path)
+        else:
+            # Check new location first (.data/config.yaml), then legacy (config.yaml)
+            new_path = DEFAULT_CONFIG_PATH
+            legacy_path = DEFAULT_DATA_DIR / "config.yaml"
+            if new_path.exists():
+                self._config_path = new_path
+            elif legacy_path.exists():
+                self._config_path = legacy_path
+            else:
+                self._config_path = new_path  # default to new location for fresh init
 
     @property
     def config_path(self) -> Path:

@@ -56,6 +56,95 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                 not_found.append(pid)
         return found, not_found
 
+    def _sync_papers_to_vault(paper_ids: list[str]) -> int:
+        """Sync specific papers to 02-论文库/ for Obsidian wikilink resolution.
+
+        Called automatically by paper_save_report to ensure referenced papers
+        have vault files. Returns count of newly created files.
+        """
+        from paper_agent.services.workspace_manager import WorkspaceManager
+
+        ctx.workspace_manager.ensure_initialized()
+        vault_dir = ctx.workspace_manager.root / "02-论文库"
+        vault_dir.mkdir(parents=True, exist_ok=True)
+
+        created = 0
+        for pid in paper_ids:
+            paper = _resolve_paper(pid)
+            if not paper:
+                continue
+            fname = WorkspaceManager._paper_filename(paper)
+            filepath = vault_dir / f"{fname}.md"
+            if filepath.exists():
+                continue
+
+            try:
+                year = str(paper.published_at.year) if paper.published_at else "N/A"
+                authors_list = paper.authors[:5] if paper.authors else []
+                authors_str = ", ".join(authors_list)
+                first_author = paper.authors[0].split()[-1] if paper.authors else "Unknown"
+
+                tags: list[str] = []
+                for t in (paper.topics or [])[:5]:
+                    tags.append(f"topic/{t.replace(' ', '-')}")
+                if paper.reading_status:
+                    tags.append(f"status/{paper.reading_status}")
+
+                profile = ctx.storage.get_paper_profile(paper.id)
+                if profile:
+                    if profile.method_family:
+                        tags.append(f"method/{profile.method_family.replace(' ', '-')}")
+                    if profile.task:
+                        tags.append(f"task/{profile.task.replace(' ', '-')}")
+
+                lines = [
+                    "---",
+                    f'title: "{paper.title}"',
+                    f"first_author: {first_author}",
+                    f"authors: [{authors_str}]",
+                    f"year: {year}",
+                    f"score: {paper.relevance_score or 0}",
+                    f"status: {paper.reading_status or 'unread'}",
+                    f"source: {paper.source_name}",
+                    f"url: {paper.url}",
+                    f"arxiv_id: \"{paper.source_paper_id or ''}\"",
+                    f"tags: [{', '.join(tags)}]",
+                    f"date: {paper.published_at.strftime('%Y-%m-%d') if paper.published_at else ''}",
+                    "---",
+                    "",
+                    f"# {paper.title}",
+                    "",
+                    " ".join(f"#{t}" for t in tags[:6]),
+                    "",
+                    f"**Authors**: {authors_str}",
+                    f"**Year**: {year}  |  **Score**: {paper.relevance_score or 0}",
+                    f"**URL**: {paper.url}",
+                    "",
+                    "## Abstract",
+                    "",
+                    paper.abstract or "(no abstract)",
+                    "",
+                ]
+
+                if profile:
+                    lines.extend([
+                        "## Method Profile",
+                        "",
+                        f"| Field | Value |",
+                        f"|-------|-------|",
+                        f"| Task | {profile.task} |",
+                        f"| Method | {profile.method_name or profile.method_family} |",
+                        f"| Datasets | {', '.join(profile.datasets)} |",
+                        f"| Code | {profile.code_url or 'N/A'} |",
+                        "",
+                    ])
+
+                filepath.write_text("\n".join(lines), encoding="utf-8")
+                created += 1
+            except Exception:
+                pass
+        return created
+
     def _extract_arxiv_id(paper: Paper) -> str:
         """Extract arXiv ID from a paper regardless of its source."""
         if paper.canonical_key.startswith("arxiv:"):
@@ -1214,6 +1303,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         report_type: str,
         content: str,
         filename: str | None = None,
+        paper_ids: list[str] | None = None,
     ) -> str:
         """Save a structured report to the workspace as a markdown file.
 
@@ -1222,6 +1312,9 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         to persist the result to disk. The file is saved into the appropriate
         subdirectory under .paper-agent/.
 
+        IMPORTANT: Pass paper_ids to auto-sync referenced papers to 02-论文库/
+        so that [[wikilinks]] in the report resolve correctly in Obsidian.
+
         Args:
             report_type: One of "daily_digest", "triage", "survey", "insight",
                          "comparison", "analysis", "citation_map", "reading_pack",
@@ -1229,13 +1322,20 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             content: The full markdown content to save.
             filename: Optional custom filename (without directory path).
                       If omitted, auto-generated from type + date.
-                      Examples: "2025-03-15.md", "GNN-placement.md",
-                                "transformer-vs-cnn-2025-03-15.md".
+            paper_ids: Optional list of paper IDs referenced in this report.
+                       These papers will be auto-synced to 02-论文库/ so that
+                       Obsidian wikilinks work. Pass all IDs mentioned in the report.
 
         Returns:
             JSON with status, saved file path, and report type.
         """
         ctx.workspace_manager.ensure_initialized()
+
+        # Auto-sync referenced papers to vault
+        synced = 0
+        if paper_ids:
+            synced = _sync_papers_to_vault(paper_ids)
+
         try:
             path = ctx.workspace_manager.save_report(
                 report_type=report_type,
@@ -1250,6 +1350,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             "report_type": report_type,
             "path": str(path),
             "filename": path.name,
+            "papers_synced": synced,
         }, ensure_ascii=False)
 
     @mcp.tool()
@@ -1277,6 +1378,219 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             "status": "ok",
             "count": len(reports),
             "reports": reports,
+        }, ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def paper_sync_vault(
+        limit: int = 0,
+        min_score: float = 0.0,
+        status: str | None = None,
+        force: bool = False,
+    ) -> str:
+        """Sync papers from the database to 02-论文库/ as Obsidian markdown files.
+
+        Each paper becomes a separate .md file with:
+        - Standardized YAML frontmatter (for Dataview queries)
+        - Hierarchical tags (#method/GNN, #venue/NeurIPS, #topic/EDA)
+        - Wikilinks to related papers [[02-论文库/xxx]]
+        - Structured profile and notes if available
+
+        Incremental: only creates files for new papers (unless force=True).
+
+        Args:
+            limit: Max papers to sync (0 = all).
+            min_score: Only sync papers with relevance_score >= this value.
+            status: Only sync papers with this reading_status (e.g. "important", "to_read").
+            force: If True, overwrite existing vault files.
+
+        Returns:
+            JSON with sync statistics.
+        """
+        from paper_agent.services.workspace_manager import WorkspaceManager
+
+        ctx.workspace_manager.ensure_initialized()
+        vault_dir = ctx.workspace_manager.root / "02-论文库"
+        vault_dir.mkdir(parents=True, exist_ok=True)
+
+        # Query papers from database
+        query = "SELECT id FROM papers WHERE 1=1"
+        params: list = []
+        if min_score > 0:
+            query += " AND relevance_score >= ?"
+            params.append(min_score)
+        if status:
+            query += " AND reading_status = ?"
+            params.append(status)
+        query += " ORDER BY relevance_score DESC"
+        if limit > 0:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        rows = ctx.storage.conn.execute(query, params).fetchall()
+        paper_ids = [r["id"] for r in rows]
+
+        # Build a lookup for wikilinks: paper_id → filename
+        all_rows = ctx.storage.conn.execute("SELECT id, source_paper_id, title FROM papers").fetchall()
+        id_to_filename: dict[str, str] = {}
+        for r in all_rows:
+            pid = r["id"]
+            src_id = r["source_paper_id"] or ""
+            src_id = re.sub(r"[/\\:]", "_", src_id).strip()
+            t_slug = re.sub(r"[^\w\s-]", "", r["title"])[:80].strip().replace(" ", "_")
+            if src_id and src_id != pid:
+                id_to_filename[pid] = f"{src_id}_{t_slug}"
+            else:
+                id_to_filename[pid] = t_slug
+
+        created = 0
+        skipped = 0
+        errors = 0
+
+        for pid in paper_ids:
+            paper = ctx.storage.get_paper(pid)
+            if not paper:
+                errors += 1
+                continue
+
+            fname = WorkspaceManager._paper_filename(paper)
+            filepath = vault_dir / f"{fname}.md"
+
+            if filepath.exists() and not force:
+                skipped += 1
+                continue
+
+            try:
+                year = str(paper.published_at.year) if paper.published_at else "N/A"
+                authors_list = paper.authors[:5] if paper.authors else []
+                authors_str = ", ".join(authors_list)
+                first_author = paper.authors[0].split()[-1] if paper.authors else "Unknown"
+
+                # Build hierarchical tags
+                tags: list[str] = []
+                for t in (paper.topics or [])[:5]:
+                    tags.append(f"topic/{t.replace(' ', '-')}")
+                if paper.venue:
+                    tags.append(f"venue/{paper.venue.replace(' ', '-')}")
+                if paper.reading_status:
+                    tags.append(f"status/{paper.reading_status}")
+                if paper.source_name:
+                    tags.append(f"source/{paper.source_name}")
+
+                profile = ctx.storage.get_paper_profile(paper.id)
+                if profile:
+                    if profile.method_family:
+                        tags.append(f"method/{profile.method_family.replace(' ', '-')}")
+                    if profile.task:
+                        tags.append(f"task/{profile.task.replace(' ', '-')}")
+
+                # Frontmatter
+                lines = [
+                    "---",
+                    f'title: "{paper.title}"',
+                    f"first_author: {first_author}",
+                    f"authors: [{authors_str}]",
+                    f"year: {year}",
+                    f"score: {paper.relevance_score or 0}",
+                    f"status: {paper.reading_status or 'unread'}",
+                    f"source: {paper.source_name}",
+                    f"venue: \"{paper.venue or ''}\"",
+                    f"url: {paper.url}",
+                    f"arxiv_id: \"{paper.source_paper_id or ''}\"",
+                    f"tags: [{', '.join(tags)}]",
+                    f"date: {paper.published_at.strftime('%Y-%m-%d') if paper.published_at else ''}",
+                    "---",
+                    "",
+                ]
+
+                # Body
+                tags_inline = " ".join(f"#{t}" for t in tags[:6])
+                lines.extend([
+                    f"# {paper.title}",
+                    "",
+                    tags_inline,
+                    "",
+                    f"**Authors**: {authors_str}",
+                    f"**Year**: {year}  |  **Venue**: {paper.venue or 'N/A'}  |  **Score**: {paper.relevance_score or 0}",
+                    f"**URL**: {paper.url}",
+                    "",
+                    "## Abstract",
+                    "",
+                    paper.abstract or "(no abstract)",
+                    "",
+                ])
+
+                # Structured profile
+                if profile:
+                    lines.extend([
+                        "## Method Profile",
+                        "",
+                        f"| Field | Value |",
+                        f"|-------|-------|",
+                        f"| Task | {profile.task} |",
+                        f"| Method | {profile.method_name or profile.method_family} |",
+                        f"| Datasets | {', '.join(profile.datasets)} |",
+                        f"| Baselines | {', '.join(profile.baselines)} |",
+                        f"| Metrics | {', '.join(profile.metrics)} |",
+                        f"| Code | {profile.code_url or 'N/A'} |",
+                        "",
+                    ])
+
+                # Citation links (wikilinks to other papers in vault)
+                refs = ctx.storage.conn.execute(
+                    "SELECT cited_paper_id FROM paper_citations WHERE citing_paper_id = ?",
+                    (pid,),
+                ).fetchall()
+                cited_by = ctx.storage.conn.execute(
+                    "SELECT citing_paper_id FROM paper_citations WHERE cited_paper_id = ?",
+                    (pid,),
+                ).fetchall()
+
+                if refs or cited_by:
+                    lines.append("## Related Papers")
+                    lines.append("")
+                    if refs:
+                        lines.append("**References (this paper cites):**")
+                        for r in refs[:15]:
+                            ref_fname = id_to_filename.get(r["cited_paper_id"])
+                            if ref_fname:
+                                lines.append(f"- [[02-论文库/{ref_fname}]]")
+                        lines.append("")
+                    if cited_by:
+                        lines.append("**Cited by:**")
+                        for c in cited_by[:15]:
+                            c_fname = id_to_filename.get(c["citing_paper_id"])
+                            if c_fname:
+                                lines.append(f"- [[02-论文库/{c_fname}]]")
+                        lines.append("")
+
+                # Notes
+                notes = ctx.storage.get_notes(paper.id)
+                if notes:
+                    lines.append("## Notes")
+                    lines.append("")
+                    for note in notes:
+                        source_label = "AI Analysis" if note["source"] == "ai_analysis" else "Note"
+                        ts = note["created_at"][:16] if note.get("created_at") else ""
+                        lines.append(f"### {source_label} ({ts})")
+                        lines.append("")
+                        lines.append(note["content"])
+                        lines.append("")
+
+                filepath.write_text("\n".join(lines), encoding="utf-8")
+                created += 1
+            except Exception:
+                errors += 1
+
+        # Rebuild dashboard after sync
+        ctx.workspace_manager.rebuild_dashboard()
+
+        return json.dumps({
+            "status": "ok",
+            "vault_dir": str(vault_dir),
+            "total_in_db": len(paper_ids),
+            "created": created,
+            "skipped_existing": skipped,
+            "errors": errors,
         }, ensure_ascii=False, default=str)
 
     @mcp.tool()
