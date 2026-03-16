@@ -254,22 +254,104 @@ class WorkspaceManager:
         )
 
     def _init_query_pages(self) -> None:
-        """Generate pre-built query pages. Static content + Dataview fallback."""
+        """Generate pre-built Dataview query pages for common views."""
         vault_dir = self._root / "02-论文库"
         vault_dir.mkdir(exist_ok=True)
 
-        # These are placeholder pages; actual content is filled by rebuild_query_pages()
-        for fname, title in [
-            ("_按方法分类.md", "📊 按方法分类"),
-            ("_按年份分布.md", "📅 按年份分布"),
-            ("_按会议分类.md", "🏛️ 按会议分类"),
-            ("_最近入库.md", "🆕 最近入库"),
-            ("_高分论文.md", "⭐ 高分论文"),
-            ("_阅读进度.md", "📖 阅读进度"),
-        ]:
-            fp = vault_dir / fname
-            if not fp.exists():
-                fp.write_text(f"# {title}\n\n(同步论文后自动填充)\n", encoding="utf-8")
+        (vault_dir / "_按方法分类.md").write_text("""# 📊 按方法分类
+
+```dataview
+TABLE length(rows) as "论文数"
+FROM "02-论文库"
+WHERE !startswith(file.name, "_")
+FLATTEN tags as tag
+WHERE startswith(tag, "topic/")
+GROUP BY tag
+SORT length(rows) DESC
+```
+""", encoding="utf-8")
+
+        (vault_dir / "_按年份分布.md").write_text("""# 📅 按年份分布
+
+```dataview
+TABLE length(rows) as "论文数"
+FROM "02-论文库"
+WHERE !startswith(file.name, "_")
+GROUP BY year
+SORT year DESC
+```
+""", encoding="utf-8")
+
+        (vault_dir / "_按会议分类.md").write_text("""# 🏛️ 按来源分类
+
+```dataview
+TABLE length(rows) as "论文数"
+FROM "02-论文库"
+WHERE !startswith(file.name, "_")
+GROUP BY source
+SORT length(rows) DESC
+```
+""", encoding="utf-8")
+
+        (vault_dir / "_最近入库.md").write_text("""# 🆕 最近入库
+
+```dataview
+TABLE first_author as "一作", year as "年份", score as "分数", status as "状态"
+FROM "02-论文库"
+WHERE !startswith(file.name, "_")
+SORT file.ctime DESC
+LIMIT 50
+```
+""", encoding="utf-8")
+
+        (vault_dir / "_高分论文.md").write_text("""# ⭐ 高分论文 (score ≥ 8)
+
+```dataview
+TABLE first_author as "一作", year as "年份", score as "分数", status as "状态"
+FROM "02-论文库"
+WHERE !startswith(file.name, "_") AND score >= 8
+SORT score DESC
+```
+
+> 💡 论文 score 由 `paper_digest` 或 `paper_auto_triage` 流程打分。
+> 如果全部为 0，说明这些论文还没经过评分。对 Claude 说"帮我给论文打分"即可。
+""", encoding="utf-8")
+
+        (vault_dir / "_阅读进度.md").write_text("""# 📖 阅读进度
+
+## ⭐ 重要
+```dataview
+TABLE first_author as "一作", score as "分数"
+FROM "02-论文库"
+WHERE status = "important"
+SORT score DESC
+```
+
+## 📖 阅读中
+```dataview
+TABLE first_author as "一作", score as "分数"
+FROM "02-论文库"
+WHERE status = "reading"
+SORT score DESC
+```
+
+## 📋 待读
+```dataview
+TABLE first_author as "一作", score as "分数"
+FROM "02-论文库"
+WHERE status = "to_read"
+SORT score DESC
+LIMIT 30
+```
+
+## ✅ 已读
+```dataview
+TABLE first_author as "一作", score as "分数"
+FROM "02-论文库"
+WHERE status = "read"
+SORT score DESC
+```
+""", encoding="utf-8")
 
     def rebuild_query_pages(self) -> None:
         """Rebuild static query pages from database. Called after paper_sync_vault."""
