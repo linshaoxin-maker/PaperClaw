@@ -1536,14 +1536,19 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                     ])
 
                 # Citation links (wikilinks to other papers in vault)
-                refs = ctx.storage.conn.execute(
-                    "SELECT cited_paper_id FROM paper_citations WHERE citing_paper_id = ?",
-                    (pid,),
-                ).fetchall()
-                cited_by = ctx.storage.conn.execute(
-                    "SELECT citing_paper_id FROM paper_citations WHERE cited_paper_id = ?",
-                    (pid,),
-                ).fetchall()
+                refs = []
+                cited_by = []
+                try:
+                    refs = ctx.storage.conn.execute(
+                        "SELECT cited_paper_id FROM paper_citations WHERE citing_paper_id = ?",
+                        (pid,),
+                    ).fetchall()
+                    cited_by = ctx.storage.conn.execute(
+                        "SELECT citing_paper_id FROM paper_citations WHERE cited_paper_id = ?",
+                        (pid,),
+                    ).fetchall()
+                except Exception:
+                    pass  # table may not exist yet
 
                 if refs or cited_by:
                     lines.append("## Related Papers")
