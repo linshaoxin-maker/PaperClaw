@@ -43,6 +43,7 @@ allowed-tools: [
   "mcp__paper-agent__paper_save_report",
   "mcp__paper-agent__paper_search",
   "mcp__paper-agent__paper_search_batch",
+  "mcp__paper-agent__paper_sync_vault",
   "mcp__paper-agent__paper_search_online",
   "mcp__paper-agent__paper_sections",
   "mcp__paper-agent__paper_set_context",
@@ -117,6 +118,22 @@ Unified entry point — understand user state, recommend actions, and execute in
    | 10 | 配置方向 | 设定 profile | `/paper-setup` |
    | 11 | 采集论文 | 批量抓取 | `/paper-collect` |
    | 12 | 健康检查 | 诊断安装 | "检查一下" 或 call `paper_health` |
+   | 13 | 📚 Obsidian 同步 | 论文库同步到 Obsidian | "同步到 Obsidian" 或 call `paper_sync_vault` |
+   | 14 | 📊 查看报告 | 已保存的报告列表 | "看看保存过的报告" 或 call `paper_list_reports` |
 
 4. **If user directly states intent** (e.g. "今天看什么", "搜 GNN 的论文"), skip the menu and **execute immediately** using the tools above. This is the key difference from a menu — /paper can route AND execute.
 5. For multi-step workflows, read `.claude/skills/<name>/SKILL.md` for the full flow.
+
+### 📚 Obsidian 知识库联动
+
+所有输出件自动同步到 `.paper-agent/` 目录，用 Obsidian 打开即可浏览。
+
+**重要**：Obsidian vault 路径就是 `.paper-agent/` 目录。**永远不要问用户 vault 路径**。
+`paper_sync_vault` 不需要任何路径参数，自动写入 `.paper-agent/02-论文库/`。
+
+**日常使用**：
+- 调用 `paper_sync_vault` 同步论文到 Obsidian（不需要传路径）
+- 每次 `paper_save_report` 时传 `paper_ids`，涉及的论文自动同步
+- `00-Dashboard.md` — 仪表盘
+- `02-论文库/` — 所有论文卡片 + Dataview 查询页
+- Graph View (`Cmd+G`) — 论文引用关系图谱

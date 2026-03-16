@@ -63,13 +63,21 @@ def _get_ctx(config_path: str | None = None, debug: bool = False):  # type: igno
 @app.command()
 def init(
     config_path: Optional[str] = typer.Option(None, "--config", help="Custom config path"),
+    local: bool = typer.Option(False, "--local", "-l", help="Initialize in current directory (.paper-agent/)"),
     provider: Optional[str] = typer.Option(None, "--provider", help="LLM provider (anthropic/openai)"),
     api_key: Optional[str] = typer.Option(None, "--api-key", help="LLM API key"),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Custom API base URL"),
     model: Optional[str] = typer.Option(None, "--model", help="LLM model name"),
 ) -> None:
-    """Initialize Paper Agent (LLM-only infrastructure setup)."""
+    """Initialize Paper Agent (LLM-only infrastructure setup).
+
+    By default, uses ~/.paper-agent. Use --local to initialize in cwd/.paper-agent
+    so that the paper library is bound to the current project directory.
+    """
     from paper_agent.app.config_manager import ConfigManager, ConfigProfile
+
+    if local and not config_path:
+        config_path = str(Path.cwd() / ".paper-agent" / "config.yaml")
 
     cm = ConfigManager(config_path)
     existing_config: ConfigProfile | None = None
@@ -121,6 +129,13 @@ def init(
         llm_base_url=base_url_val,
         profile_completed=False,
     )
+
+    # When --local, override data paths to cwd/.paper-agent
+    if local and not existing_config:
+        local_dir = Path.cwd() / ".paper-agent"
+        config.data_dir = str(local_dir)
+        config.db_path = str(local_dir / "library.db")
+        config.artifacts_dir = str(local_dir / "artifacts")
 
     errors = cm.validate_config(config, require_profile=False)
     if errors:
@@ -617,7 +632,7 @@ def doctor(
 
     # 7. Workspace
     ws_dir = cwd / ".paper-agent"
-    if ws_dir.exists() and (ws_dir / "README.md").exists():
+    if ws_dir.exists() and (ws_dir / "研究日志.md").exists():
         checks.append(("Workspace（.paper-agent/）", True, str(ws_dir)))
     elif ws_dir.exists():
         checks.append(("Workspace（.paper-agent/）", False, "不完整 → 重新运行 setup"))

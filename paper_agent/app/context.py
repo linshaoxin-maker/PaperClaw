@@ -151,7 +151,7 @@ class AppContext:
     @cached_property
     def workspace_manager(self) -> WorkspaceManager:
         cfg = self.config
-        workspace_dir = Path(cfg.data_dir).parent / ".paper-agent"
+        workspace_dir = Path(cfg.data_dir)
         return WorkspaceManager(workspace_dir, self.storage)
 
     @cached_property

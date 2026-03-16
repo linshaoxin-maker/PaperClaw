@@ -1,6 +1,6 @@
 # Paper Agent in Claude Code — 完整使用指南
 
-在 Claude Code 中使用 paper-agent 的详细旅程。从安装配置到 10 个 slash 命令的完整交互示例。
+在 Claude Code 中使用 paper-agent 的详细旅程。从安装配置到 10 个 slash 命令的完整交互示例，以及 Obsidian 知识库联动。
 
 ---
 
@@ -21,6 +21,50 @@ paper-agent init
 ```
 
 之后所有操作都可以在 Claude Code 中完成，不需要再回终端。
+
+### Obsidian 知识库设置（推荐）
+
+paper-agent 的所有输出件会自动保存到 `.paper-agent/` 目录。用 Obsidian 打开这个目录，即可获得完整的论文知识库体验。
+
+```
+# 1. 打开 Obsidian → "Open folder as vault" → 选择 ~/.paper-agent/
+#    （macOS 文件选择器中按 Cmd+Shift+G 输入路径）
+#
+# 2. 安装推荐插件（设置 → 第三方插件 → 关闭安全模式 → 浏览）
+#    - Dataview：动态表格和查询（Dashboard 和查询页需要）
+#    - Calendar：日历视图，按日期浏览每日推荐
+#
+# 3. 在 Claude 中说"同步论文到 Obsidian"，论文库自动同步
+```
+
+设置完成后，Obsidian 中会看到：
+
+```
+.paper-agent/
+├── 00-Dashboard.md           ← 动态仪表盘（Dataview 查询）
+├── 01-每日推荐/              ← 每日论文推荐
+├── 02-论文库/                ← 所有论文卡片 + 预置查询页
+│   ├── _高分论文.md          ← score ≥ 8 的论文
+│   ├── _按方法分类.md        ← 按 GNN/Transformer/RL 等分组
+│   ├── _按会议分类.md        ← 按 NeurIPS/ICML 等分组
+│   ├── _按年份分布.md
+│   ├── _最近入库.md
+│   ├── _阅读进度.md
+│   └── {论文卡片}.md         ← 每篇论文一个文件
+├── 03-深度分析/
+├── 04-对比分析/
+├── 05-文献综述/
+├── 06-趋势洞察/
+├── 07-阅读包/
+├── 08-研究Ideas/
+├── 09-实验计划/
+├── 10-引用追踪/
+├── 11-论文分组/
+├── 12-搜索结果/
+├── 13-筛选报告/
+├── 阅读清单.md
+└── 研究日志.md
+```
 
 ---
 
@@ -263,6 +307,8 @@ Claude: [调用 paper_workspace_context() + paper_stats()]
         | 6 | 批量筛选 | 自动分流待读论文 | `/paper-triage` |
         | 7 | 论文对比 | 多篇论文横向对比 | `/paper-compare` |
         | 8 | 下载 PDF | 下载论文全文 | `/paper-download <ID>` |
+        | 9 | 📚 Obsidian 同步 | 论文库同步到 Obsidian | "同步到 Obsidian" |
+        | 10 | 📊 查看报告 | 已保存的报告列表 | "看看保存过的报告" |
 
         直接告诉我你想做什么，或输入上面的命令。
 
@@ -1087,13 +1133,51 @@ Claude: → 切换到 literature-survey 工作流...
 
 ---
 
-## Workspace 功能
+## Workspace 功能 & Obsidian 知识库
 
 v02 引入 **Workspace Layer**——`.paper-agent/` 目录下的一组 markdown 文件，
 作为你和 AI 之间的"共享工作记忆"。所有操作自动记录，打开文件夹就能看到全貌。
 
+v04 引入 **Obsidian 知识库联动**——用 Obsidian 打开 `.paper-agent/` 目录，获得完整的论文管理体验：
+- **知识图谱**：Graph View 自动显示论文之间的引用关系网络
+- **动态查询**：Dataview 插件支持 SQL 式查询（高分论文、按方法分组等）
+- **日历视图**：Calendar 插件按日期浏览每日推荐
+- **标签筛选**：层级标签 `#method/GNN`、`#venue/NeurIPS` 等
+- **全文搜索**：`Cmd+Shift+F` 搜索所有论文和笔记
+
 > Workspace 由 `paper-agent setup` 命令自动创建，MCP 工具也会在需要时静默自动初始化。
-> `.paper-agent/README.md` 是自动更新的仪表盘。
+> `00-Dashboard.md` 是 Dataview 动态仪表盘。
+
+### Obsidian 同步
+
+```
+You: 同步论文到 Obsidian
+
+Claude: [调用 paper_sync_vault(limit=0)]
+
+        ✅ 论文库已同步到 Obsidian
+
+        | 项目 | 数量 |
+        |------|------|
+        | 数据库总计 | 3,533 |
+        | 新同步 | 3,533 |
+        | 已存在跳过 | 0 |
+
+        论文卡片已保存到 `02-论文库/`，每篇包含：
+        - YAML frontmatter（Dataview 可查询）
+        - 层级标签（#method/GNN, #venue/NeurIPS 等）
+        - 引用关系 wikilink（Graph View 可视化）
+        - Method Profile + Notes
+
+        在 Obsidian 中打开 `.paper-agent/` 即可浏览。
+        推荐安装 Dataview 和 Calendar 插件获得最佳体验。
+
+You: 只同步高分论文
+
+Claude: [调用 paper_sync_vault(min_score=8.0)]
+
+        ✅ 已同步 score ≥ 8.0 的论文（共 127 篇）。
+```
 
 ### Workspace 仪表盘
 
@@ -1124,8 +1208,8 @@ Claude: [调用 paper_workspace_status()]
         - 2026-03-13 | 添加笔记: RL-Placer: Deep RL...
         - 2026-03-12 | 创建分组: rl-placement-papers
 
-        仪表盘已更新 → `.paper-agent/README.md`
-        你也可以直接打开这个文件查看。
+        仪表盘已更新 → `.paper-agent/00-Dashboard.md`
+        在 Obsidian 中打开可看到 Dataview 动态查询。
 ```
 
 ### 阅读状态管理
@@ -1182,7 +1266,7 @@ Claude: [调用 paper_group_create(
         )]
 
         ✅ 分组 "rl-placement" 已创建。
-        文件：`.paper-agent/collections/rl-placement.md`
+        文件：`.paper-agent/11-论文分组/rl-placement.md`
 
         要加哪些论文进去？
 
@@ -1196,6 +1280,7 @@ Claude: [调用 paper_group_add(
 
         ✅ 4 篇已添加到分组 "rl-placement"（共 4 篇）。
         collections/rl-placement.md 已更新。
+        在 Obsidian 中可通过 [[11-论文分组/rl-placement]] 查看。
 
 You: 看看有哪些分组
 
@@ -1236,7 +1321,8 @@ Claude: [调用 paper_citations(
         3. ...
 
         新发现的论文已自动保存到本地库（23 篇新增）。
-        引用链记录：`.paper-agent/citation-traces/rl-placement-chain.md`
+        引用链记录：`.paper-agent/10-引用追踪/rl-placement-chain.md`
+        在 Obsidian Graph View 中可看到引用关系网络。
 
         要深入看某篇吗？或者继续追踪某篇的引用？
 
@@ -1252,7 +1338,7 @@ Claude: [调用 paper_citations(
         Google Chip Placement 引用了 10 篇关键论文：
         ...
 
-        引用链追踪已追加到 `citation-traces/rl-placement-chain.md`。
+        引用链追踪已追加到 `10-引用追踪/rl-placement-chain.md`。
 ```
 
 ### 跨会话上下文恢复
@@ -1389,29 +1475,39 @@ Claude: [调用 paper_search_online("LoRA fine-tuning EDA circuit design")]
 08:00  /start-my-day
        → workspace_context 恢复昨日上下文
        → 三源并行采集 47 篇新论文 → 推荐 5 篇高置信
+       → 报告自动保存到 01-每日推荐/，涉及论文同步到 02-论文库/
+
+08:05  打开 Obsidian
+       → 00-Dashboard.md 显示最新统计
+       → 01-每日推荐/ 看到今日推荐，点击论文直达卡片
+       → Graph View 看到新论文与已有论文的关联
 
 08:10  "第 2 篇不错，标记待读；第 1 篇很重要"
-       → paper_reading_status → reading-list.md 更新
+       → paper_reading_status → 阅读清单.md 更新
+       → Obsidian 中 02-论文库/_阅读进度.md 实时反映
 
 08:15  /paper-analyze 2603.04567
-       → 深度分析 → paper_note_add 保存笔记
-       → .paper-agent/notes/ 自动更新
+       → 深度分析 → paper_save_report("analysis", paper_ids=[...])
+       → 03-深度分析/ 自动出现分析笔记
+       → 论文卡片同步到 02-论文库/
 
 10:30  （写代码中）"这个 GNN aggregation 有论文讲过吗？"
        → paper_search(diverse=True) → 扩展搜索 → 找到 8 篇
 
 11:00  "看看这篇引用了什么"
-       → paper_citations → 引用链 → citation-traces/ 更新
+       → paper_citations → 引用链 → 10-引用追踪/ 更新
+       → Obsidian Graph View 自动显示引用网络
 
 14:00  /paper-compare
        → 选 4 篇 RL placement 论文 → 对比方法和结果
-       → paper_group_create("rl-placement") → 创建分组
+       → 报告保存到 04-对比分析/
+       → paper_group_create("rl-placement") → 11-论文分组/ 更新
 
 15:00  /paper-survey AI for Chip Placement
        → paper_search_batch 多方向搜索
        → paper_search_online (arXiv + S2 并行) 在线补充
-       → paper_batch_show (compact) 获取详情
-       → 生成综述 → 修改 → 保存
+       → 生成综述 → 保存到 05-文献综述/
+       → 所有引用论文自动同步到 02-论文库/
 
 16:30  "导出今天看过的论文 BibTeX"
        → paper_export → refs.bib
@@ -1419,14 +1515,18 @@ Claude: [调用 paper_search_online("LoRA fine-tuning EDA circuit design")]
 17:00  "帮我把 survey 里的 15 篇 PDF 全下载了"
        → paper_download(15 篇 IDs) → papers/ 目录
 
-17:15  "帮我找一下 DREAMPlace 那篇论文，下载一下"
-       → paper_find_and_download("DREAMPlace...") → 入库 + PDF
+17:15  打开 Obsidian 回顾今天
+       → 00-Dashboard.md 看到更新后的统计
+       → Graph View 看到今天新增的论文关联
+       → 02-论文库/_高分论文.md 看到新入库的高分论文
+       → Calendar 视图看到今日推荐时间线
 
 -- 次日 --
 
 08:00  /start-my-day
        → "昨天你分析了 RL-Placer，对比了 4 篇，创建了分组..."
        → 无缝恢复上下文
+       → Obsidian 中所有昨天的产出都在
 ```
 
 ---
@@ -1450,13 +1550,14 @@ Claude Code 理解意图 → 确认/澄清
 ```
 
 Claude Code 在每个环节：
-- **记忆**：每次操作自动写入 research-journal.md，新会话自动恢复上下文
+- **记忆**：每次操作自动写入 研究日志.md，新会话自动恢复上下文
 - **首次检测**：自动检测 profile 和库状态，主动引导新用户
 - **理解**：把模糊的描述转化为精确的查询
 - **表格呈现**：论文列表一律用表格（标题+评分+关键词+一句话），不用 bullet list
 - **结论先行**：每个 workflow 输出必须包含「结论与建议」——告诉研究员数据意味着什么
 - **批量**：多方向任务用 `paper_search_batch` 一次搞定，不逐个调用
 - **自动追踪**：工作区操作（笔记、标记、分组）自动执行，文件导出需确认
+- **Obsidian 联动**：每次 `paper_save_report` 自动传 `paper_ids`，涉及的论文同步到 `02-论文库/`，Obsidian 实时更新
 - **持久化**：笔记、分组、引用链自动保存为 markdown 文件，人可读
 - **引导**：每步结束后给出 2-3 个选项（含保存/导出），不留死胡同
 - **兜底**：库为空、搜索无结果、下载失败时给出友好提示和替代建议
@@ -1524,5 +1625,5 @@ Claude: LLM 评分失败：API key invalid
 | 分组管理 | 不支持 | `paper_group_add(create_if_missing=True)`（一步到位） |
 | 笔记+标记 | 不支持 | `paper_note_add(mark_as="reading")`（一步两操作） |
 | 上下文 | 需要在终端和 IDE 间切换 | `paper_workspace_context`（含 mode 字段自动识别用户类型） |
-| 研究全貌 | 只能通过命令查 | 打开 `.paper-agent/` 目录即见 |
+| 研究全貌 | 只能通过命令查 | 打开 `.paper-agent/` 目录即见，Obsidian 知识图谱 + Dataview 动态查询 |
 | 语言 | 英文命令 + 英文输出 | 自然语言输入 + 中文输出 |

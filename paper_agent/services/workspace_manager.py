@@ -1,4 +1,30 @@
-"""Workspace Layer: manages .paper-agent/ directory of human-readable markdown files."""
+"""Workspace Layer: manages .paper-agent/ directory of human-readable markdown files.
+
+Directory structure (Obsidian-friendly):
+
+    .paper-agent/
+    ├── .data/                    ← system files (hidden in Obsidian)
+    │   ├── config.yaml
+    │   ├── library.db
+    │   ├── sources.yaml
+    │   └── artifacts/
+    ├── 00-Dashboard.md           ← home dashboard
+    ├── 01-每日推荐/
+    ├── 02-论文库/                ← all papers (sync_vault output)
+    ├── 03-深度分析/
+    ├── 04-对比分析/
+    ├── 05-文献综述/
+    ├── 06-趋势洞察/
+    ├── 07-阅读包/
+    ├── 08-研究Ideas/
+    ├── 09-实验计划/
+    ├── 10-引用追踪/
+    ├── 11-论文分组/
+    ├── 12-搜索结果/
+    ├── 13-筛选报告/
+    ├── 阅读清单.md
+    └── 研究日志.md
+"""
 
 from __future__ import annotations
 
@@ -9,65 +35,69 @@ from typing import Any
 
 from paper_agent.infra.storage.sqlite_storage import SQLiteStorage
 
-_JOURNAL_TEMPLATE = """# Research Journal
+_JOURNAL_TEMPLATE = """# 研究日志
 
 > Last updated: —
 > Entries: 0 (max 50, auto-archived)
 """
 
-_READING_LIST_TEMPLATE = """# Reading List
+_READING_LIST_TEMPLATE = """# 阅读清单
 
 > Auto-generated from database. Last synced: —
 
-## Important
+## ⭐ 重要
 
 (none)
 
-## Reading
+## 📖 阅读中
 
 (none)
 
-## To Read
+## 📋 待读
 
 (none)
 
-## Read
+## ✅ 已读
 
 (none)
 """
 
-_COLLECTION_INDEX_TEMPLATE = """# Paper Collections
+_COLLECTION_INDEX_TEMPLATE = """# 论文分组
 
 > Auto-generated index. Last synced: —
 
-(no collections yet)
+(暂无分组)
 """
 
 
+# Map report_type → subdirectory name (new numbered Chinese dirs)
 _REPORT_TYPE_MAP: dict[str, str] = {
-    "daily_digest": "daily",
-    "triage": "triage",
-    "survey": "survey",
-    "insight": "insight",
-    "comparison": "compare",
-    "analysis": "notes",
-    "citation_map": "citation-traces",
-    "reading_pack": "reading-packs",
-    "ideation": "ideas",
-    "experiment_plan": "experiment-plans",
-    "search_result": "search-results",
+    "daily_digest": "01-每日推荐",
+    "triage": "13-筛选报告",
+    "survey": "05-文献综述",
+    "insight": "06-趋势洞察",
+    "comparison": "04-对比分析",
+    "analysis": "03-深度分析",
+    "citation_map": "10-引用追踪",
+    "reading_pack": "07-阅读包",
+    "ideation": "08-研究Ideas",
+    "experiment_plan": "09-实验计划",
+    "search_result": "12-搜索结果",
 }
 
 
 class WorkspaceManager:
-    """Manages the .paper-agent/ workspace directory."""
+    """Manages the .paper-agent/ workspace directory (Obsidian-friendly)."""
 
     DIRS = (
-        "collections", "notes", "citation-traces",
-        "daily", "triage", "survey", "insight", "compare", "reading-packs",
-        "ideas", "experiment-plans", "search-results",
+        "01-每日推荐", "02-论文库", "03-深度分析", "04-对比分析",
+        "05-文献综述", "06-趋势洞察", "07-阅读包", "08-研究Ideas",
+        "09-实验计划", "10-引用追踪", "11-论文分组", "12-搜索结果",
+        "13-筛选报告",
     )
-    FILES = ("research-journal.md", "reading-list.md")
+    JOURNAL_FILE = "研究日志.md"
+    READING_LIST_FILE = "阅读清单.md"
+    DASHBOARD_FILE = "00-Dashboard.md"
 
     def __init__(self, workspace_dir: Path, storage: SQLiteStorage | None = None) -> None:
         self._root = workspace_dir
@@ -80,7 +110,7 @@ class WorkspaceManager:
     # ── Init ──
 
     def is_initialized(self) -> bool:
-        return self._root.is_dir() and (self._root / "research-journal.md").exists()
+        return self._root.is_dir() and (self._root / self.JOURNAL_FILE).exists()
 
     def init(self) -> dict[str, Any]:
         if self.is_initialized():
@@ -96,15 +126,27 @@ class WorkspaceManager:
             (self._root / d).mkdir(exist_ok=True)
             created.append(f"{d}/")
 
-        (self._root / "research-journal.md").write_text(_JOURNAL_TEMPLATE, encoding="utf-8")
-        created.append("research-journal.md")
+        (self._root / self.JOURNAL_FILE).write_text(_JOURNAL_TEMPLATE, encoding="utf-8")
+        created.append(self.JOURNAL_FILE)
 
-        (self._root / "reading-list.md").write_text(_READING_LIST_TEMPLATE, encoding="utf-8")
-        created.append("reading-list.md")
+        (self._root / self.READING_LIST_FILE).write_text(_READING_LIST_TEMPLATE, encoding="utf-8")
+        created.append(self.READING_LIST_FILE)
 
-        idx = self._root / "collections" / "_index.md"
+        idx = self._root / "11-论文分组" / "_index.md"
         idx.write_text(_COLLECTION_INDEX_TEMPLATE, encoding="utf-8")
-        created.append("collections/_index.md")
+        created.append("11-论文分组/_index.md")
+
+        # Generate Obsidian config for best experience
+        self._init_obsidian_config()
+        created.append(".obsidian/")
+
+        # Generate Dataview query pages
+        self._init_query_pages()
+        created.append("query pages")
+
+        # Generate initial dashboard
+        self.rebuild_dashboard()
+        created.append(self.DASHBOARD_FILE)
 
         return {"status": "initialized", "path": str(self._root), "files_created": created}
 
@@ -115,16 +157,18 @@ class WorkspaceManager:
             if not dp.is_dir():
                 dp.mkdir(parents=True, exist_ok=True)
                 created.append(f"{d}/")
-        for f in self.FILES:
-            fp = self._root / f
+        for fname, template in [
+            (self.JOURNAL_FILE, _JOURNAL_TEMPLATE),
+            (self.READING_LIST_FILE, _READING_LIST_TEMPLATE),
+        ]:
+            fp = self._root / fname
             if not fp.exists():
-                template = _JOURNAL_TEMPLATE if "journal" in f else _READING_LIST_TEMPLATE
                 fp.write_text(template, encoding="utf-8")
-                created.append(f)
-        idx = self._root / "collections" / "_index.md"
+                created.append(fname)
+        idx = self._root / "11-论文分组" / "_index.md"
         if not idx.exists():
             idx.write_text(_COLLECTION_INDEX_TEMPLATE, encoding="utf-8")
-            created.append("collections/_index.md")
+            created.append("11-论文分组/_index.md")
         return created
 
     def ensure_initialized(self) -> None:
@@ -132,118 +176,574 @@ class WorkspaceManager:
         if not self.is_initialized():
             self.init()
 
+    def _init_obsidian_config(self) -> None:
+        """Generate .obsidian/ config for optimal paper browsing experience."""
+        import json as _json
+
+        obs_dir = self._root / ".obsidian"
+        obs_dir.mkdir(exist_ok=True)
+
+        # App config: enable wikilinks, set default new file location
+        app_config = {
+            "useMarkdownLinks": False,  # Use [[wikilinks]]
+            "newFileLocation": "folder",
+            "newFileFolderPath": "02-论文库",
+            "attachmentFolderPath": ".data/attachments",
+            "showUnsupportedFiles": False,
+            "defaultViewMode": "preview",
+            "readableLineLength": True,
+            "strictLineBreaks": False,
+        }
+        (obs_dir / "app.json").write_text(
+            _json.dumps(app_config, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
+        # Appearance: clean theme
+        appearance = {
+            "accentColor": "#7c5cfc",
+            "interfaceFontSize": 15,
+        }
+        (obs_dir / "appearance.json").write_text(
+            _json.dumps(appearance, indent=2), encoding="utf-8"
+        )
+
+        # Community plugins list (user still needs to install them manually)
+        # Pre-register so they're enabled once installed
+        (obs_dir / "community-plugins.json").write_text(
+            _json.dumps(["dataview", "calendar"], indent=2), encoding="utf-8"
+        )
+
+        # Graph view config: color by folder
+        graph_config = {
+            "collapse-filter": False,
+            "search": "",
+            "showTags": True,
+            "showAttachments": False,
+            "hideUnresolved": False,
+            "showOrphans": True,
+            "collapse-color-groups": False,
+            "colorGroups": [
+                {"query": "path:02-论文库", "color": {"a": 1, "rgb": 5145596}},
+                {"query": "path:01-每日推荐", "color": {"a": 1, "rgb": 16744448}},
+                {"query": "path:05-文献综述", "color": {"a": 1, "rgb": 65280}},
+                {"query": "path:03-深度分析", "color": {"a": 1, "rgb": 16776960}},
+            ],
+            "collapse-display": False,
+            "lineSizeMultiplier": 1,
+            "nodeSizeMultiplier": 1,
+            "collapse-forces": False,
+            "centerStrength": 0.518713248970312,
+            "repelStrength": 10,
+            "linkStrength": 1,
+            "linkDistance": 250,
+        }
+        (obs_dir / "graph.json").write_text(
+            _json.dumps(graph_config, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
+        # Starred / bookmarks: pin dashboard
+        bookmarks = {
+            "items": [
+                {"type": "file", "ctime": 0, "path": "00-Dashboard.md"},
+                {"type": "file", "ctime": 0, "path": "阅读清单.md"},
+                {"type": "file", "ctime": 0, "path": "研究日志.md"},
+            ]
+        }
+        (obs_dir / "bookmarks.json").write_text(
+            _json.dumps(bookmarks, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
+    def _init_query_pages(self) -> None:
+        """Generate pre-built Dataview query pages: stats overview + grouped paper lists."""
+        vault_dir = self._root / "02-论文库"
+        vault_dir.mkdir(exist_ok=True)
+
+        # ── Collect actual categories from database for grouped display ──
+        topics: list[str] = []
+        sources: list[str] = []
+        try:
+            rows = self._storage.conn.execute(
+                "SELECT DISTINCT topics_json FROM papers WHERE topics_json IS NOT NULL AND topics_json != '[]'"
+            ).fetchall()
+            topic_set: set[str] = set()
+            import json as _j
+            for r in rows:
+                try:
+                    for t in _j.loads(r[0]):
+                        topic_set.add(t)
+                except Exception:
+                    pass
+            topics = sorted(topic_set)
+
+            src_rows = self._storage.conn.execute(
+                "SELECT DISTINCT source_name FROM papers WHERE source_name IS NOT NULL"
+            ).fetchall()
+            sources = sorted(set(r[0] for r in src_rows if r[0]))
+        except Exception:
+            pass
+
+        # ── 按方法分类 ──
+        lines = [
+            "# 📊 按方法分类\n",
+            "## 统计概览",
+            "```dataview",
+            'TABLE length(rows) as "论文数"',
+            'FROM "02-论文库"',
+            'WHERE !startswith(file.name, "_")',
+            "FLATTEN tags as tag",
+            'WHERE startswith(tag, "topic/")',
+            "GROUP BY tag",
+            "SORT length(rows) DESC",
+            "```",
+            "",
+        ]
+        if topics:
+            for topic in topics:
+                tag_val = f"topic/{topic.replace(' ', '-')}"
+                lines.append(f"## {topic}")
+                lines.append("```dataview")
+                lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+                lines.append('FROM "02-论文库"')
+                lines.append('WHERE !startswith(file.name, "_")')
+                lines.append(f'WHERE contains(tags, "{tag_val}")')
+                lines.append("SORT date DESC")
+                lines.append("```")
+                lines.append("")
+        else:
+            lines.append("## 论文列表")
+            lines.append("```dataview")
+            lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+            lines.append('FROM "02-论文库"')
+            lines.append('WHERE !startswith(file.name, "_")')
+            lines.append("SORT date DESC")
+            lines.append("```")
+            lines.append("")
+        (vault_dir / "_按方法分类.md").write_text("\n".join(lines), encoding="utf-8")
+
+        # ── 按年份分布 ──
+        years: list[int] = []
+        try:
+            yr_rows = self._storage.conn.execute(
+                "SELECT DISTINCT CAST(strftime('%Y', published_at) AS INTEGER) as y "
+                "FROM papers WHERE published_at IS NOT NULL ORDER BY y DESC"
+            ).fetchall()
+            years = [r[0] for r in yr_rows if r[0]]
+        except Exception:
+            years = [2026, 2025, 2024, 2023]
+
+        lines = [
+            "# 📅 按年份分布\n",
+            "## 统计概览",
+            "```dataview",
+            'TABLE length(rows) as "论文数"',
+            'FROM "02-论文库"',
+            'WHERE !startswith(file.name, "_")',
+            "GROUP BY year",
+            "SORT year DESC",
+            "```",
+            "",
+        ]
+        for y in years:
+            lines.append(f"## {y}")
+            lines.append("```dataview")
+            lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+            lines.append('FROM "02-论文库"')
+            lines.append(f'WHERE !startswith(file.name, "_") AND year = {y}')
+            lines.append("SORT date DESC")
+            lines.append("```")
+            lines.append("")
+        (vault_dir / "_按年份分布.md").write_text("\n".join(lines), encoding="utf-8")
+
+        # ── 按来源分类 ──
+        lines = [
+            "# 🏛️ 按来源分类\n",
+            "## 统计概览",
+            "```dataview",
+            'TABLE length(rows) as "论文数"',
+            'FROM "02-论文库"',
+            'WHERE !startswith(file.name, "_")',
+            "GROUP BY source",
+            "SORT length(rows) DESC",
+            "```",
+            "",
+        ]
+        if sources:
+            for src in sources:
+                lines.append(f"## {src}")
+                lines.append("```dataview")
+                lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+                lines.append('FROM "02-论文库"')
+                lines.append(f'WHERE !startswith(file.name, "_") AND source = "{src}"')
+                lines.append("SORT date DESC")
+                lines.append("```")
+                lines.append("")
+        else:
+            lines.append("## 论文列表")
+            lines.append("```dataview")
+            lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+            lines.append('FROM "02-论文库"')
+            lines.append('WHERE !startswith(file.name, "_")')
+            lines.append("SORT date DESC")
+            lines.append("```")
+            lines.append("")
+        (vault_dir / "_按会议分类.md").write_text("\n".join(lines), encoding="utf-8")
+
+        # ── 按分组分类 ──
+        groups: list[dict] = []
+        try:
+            groups = self._storage.list_groups()
+        except Exception:
+            pass
+
+        lines = [
+            "# 📂 按分组分类\n",
+            "## 统计概览",
+            "```dataview",
+            'TABLE length(rows) as "论文数"',
+            'FROM "02-论文库"',
+            'WHERE !startswith(file.name, "_") AND groups',
+            "FLATTEN groups as grp",
+            "GROUP BY grp",
+            "SORT length(rows) DESC",
+            "```",
+            "",
+        ]
+        if groups:
+            for g in groups:
+                gname = g["name"]
+                lines.append(f"## {gname}")
+                if g.get("description"):
+                    lines.append(f"> {g['description']}\n")
+                lines.append("```dataview")
+                lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+                lines.append('FROM "02-论文库"')
+                lines.append(f'WHERE !startswith(file.name, "_") AND contains(groups, "{gname}")')
+                lines.append("SORT date DESC")
+                lines.append("```")
+                lines.append("")
+        else:
+            lines.append('> 暂无分组。对 Claude 说"帮我创建论文分组"即可。')
+            lines.append("")
+        (vault_dir / "_按分组分类.md").write_text("\n".join(lines), encoding="utf-8")
+
+        (vault_dir / "_最近入库.md").write_text("""# 🆕 最近入库
+
+```dataview
+TABLE first_author as "一作", date as "日期", score as "分数", source as "来源"
+FROM "02-论文库"
+WHERE !startswith(file.name, "_")
+SORT file.ctime DESC
+LIMIT 50
+```
+""", encoding="utf-8")
+
+        (vault_dir / "_高分论文.md").write_text("""# ⭐ 高分论文
+
+```dataview
+TABLE first_author as "一作", date as "日期", score as "分数", status as "状态"
+FROM "02-论文库"
+WHERE !startswith(file.name, "_") AND score > 0
+SORT score DESC
+```
+
+> 💡 score 为 0 的论文还没经过评分。对 Claude 说"帮我给论文打分"即可。
+""", encoding="utf-8")
+
+        (vault_dir / "_阅读进度.md").write_text("""# 📖 阅读进度
+
+## 统计概览
+```dataview
+TABLE length(rows) as "论文数"
+FROM "02-论文库"
+WHERE !startswith(file.name, "_")
+GROUP BY status
+SORT length(rows) DESC
+```
+
+## ⭐ 重要
+```dataview
+TABLE first_author as "一作", date as "日期", score as "分数"
+FROM "02-论文库"
+WHERE status = "important"
+SORT score DESC
+```
+
+## 📖 阅读中
+```dataview
+TABLE first_author as "一作", date as "日期", score as "分数"
+FROM "02-论文库"
+WHERE status = "reading"
+SORT score DESC
+```
+
+## 📋 待读
+```dataview
+TABLE first_author as "一作", date as "日期", score as "分数"
+FROM "02-论文库"
+WHERE status = "to_read"
+SORT score DESC
+```
+
+## ✅ 已读
+```dataview
+TABLE first_author as "一作", date as "日期", score as "分数"
+FROM "02-论文库"
+WHERE status = "read"
+SORT score DESC
+```
+
+## 📥 全部论文
+```dataview
+TABLE first_author as "一作", date as "日期", score as "分数", status as "状态"
+FROM "02-论文库"
+WHERE !startswith(file.name, "_")
+SORT date DESC
+```
+""", encoding="utf-8")
+
+    def rebuild_query_pages(self) -> None:
+        """Rebuild static query pages from database. Called after paper_sync_vault."""
+        if not self._storage or not self.is_initialized():
+            return
+
+        vault_dir = self._root / "02-论文库"
+        vault_dir.mkdir(exist_ok=True)
+
+        papers = self._storage.conn.execute(
+            "SELECT id, title, source_paper_id, relevance_score, reading_status, "
+            "published_at, topics_json, source_name, venue FROM papers "
+            "ORDER BY relevance_score DESC"
+        ).fetchall()
+
+        # Helper: build wikilink from db row
+        def _link(row):
+            src = re.sub(r"[/\\:]", "_", (row["source_paper_id"] or "")).strip()
+            slug = re.sub(r"[^\w\s-]", "", row["title"])[:80].strip().replace(" ", "_")
+            fname = f"{src}_{slug}" if (src and src != row["id"]) else slug
+            return f"[[02-论文库/{fname}|{row['title'][:60]}]]"
+
+        def _year(row):
+            pa = row["published_at"]
+            if not pa:
+                return "N/A"
+            return str(pa)[:4]
+
+        def _topics(row):
+            t = row["topics_json"]
+            if not t:
+                return ""
+            # topics stored as JSON string or comma-separated
+            import json as _j
+            try:
+                lst = _j.loads(t) if t.startswith("[") else [x.strip() for x in t.split(",")]
+            except Exception:
+                lst = [t]
+            return ", ".join(lst[:3])
+
+        # ── 高分论文 ──
+        lines = ["# ⭐ 高分论文 (score ≥ 8)\n"]
+        lines.append("| 论文 | 一作 | 年份 | 分数 | 状态 |")
+        lines.append("|------|------|------|------|------|")
+        for p in papers:
+            if (p["relevance_score"] or 0) >= 8:
+                lines.append(
+                    f"| {_link(p)} | — | {_year(p)} | {p['relevance_score']} | {p['reading_status'] or 'unread'} |"
+                )
+        if len(lines) == 3:
+            lines.append("| (暂无 score ≥ 8 的论文) | | | | |")
+        (vault_dir / "_高分论文.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        # ── 按方法分类 ──
+        method_groups: dict[str, list] = {}
+        for p in papers:
+            for topic in (_topics(p) or "未分类").split(", "):
+                topic = topic.strip() or "未分类"
+                method_groups.setdefault(topic, []).append(p)
+        lines = ["# 📊 按方法/主题分类\n"]
+        for method, plist in sorted(method_groups.items(), key=lambda x: -len(x[1])):
+            lines.append(f"## {method} ({len(plist)} 篇)\n")
+            for p in plist[:20]:
+                lines.append(f"- {_link(p)} (score: {p['relevance_score'] or 0})")
+            if len(plist) > 20:
+                lines.append(f"- ... 还有 {len(plist) - 20} 篇")
+            lines.append("")
+        (vault_dir / "_按方法分类.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        # ── 按年份分布 ──
+        year_groups: dict[str, list] = {}
+        for p in papers:
+            y = _year(p)
+            year_groups.setdefault(y, []).append(p)
+        lines = ["# 📅 按年份分布\n"]
+        lines.append("| 年份 | 论文数 |")
+        lines.append("|------|--------|")
+        for y in sorted(year_groups.keys(), reverse=True):
+            lines.append(f"| {y} | {len(year_groups[y])} |")
+        lines.append("")
+        for y in sorted(year_groups.keys(), reverse=True):
+            lines.append(f"## {y} ({len(year_groups[y])} 篇)\n")
+            for p in year_groups[y][:15]:
+                lines.append(f"- {_link(p)} (score: {p['relevance_score'] or 0})")
+            if len(year_groups[y]) > 15:
+                lines.append(f"- ... 还有 {len(year_groups[y]) - 15} 篇")
+            lines.append("")
+        (vault_dir / "_按年份分布.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        # ── 按会议分类 ──
+        # venue info is in topics for some sources
+        lines = ["# 🏛️ 按来源分类\n"]
+        source_groups: dict[str, list] = {}
+        for p in papers:
+            src = p["source_name"] or "unknown"
+            source_groups.setdefault(src, []).append(p)
+        for src, plist in sorted(source_groups.items(), key=lambda x: -len(x[1])):
+            lines.append(f"## {src} ({len(plist)} 篇)\n")
+            for p in plist[:15]:
+                lines.append(f"- {_link(p)} (score: {p['relevance_score'] or 0}, {_year(p)})")
+            if len(plist) > 15:
+                lines.append(f"- ... 还有 {len(plist) - 15} 篇")
+            lines.append("")
+        (vault_dir / "_按会议分类.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        # ── 最近入库 ──
+        recent = papers[:50]  # already sorted by score, re-sort by date
+        recent_sorted = sorted(recent, key=lambda p: p["published_at"] or "", reverse=True)
+        lines = ["# 🆕 最近入库 (Top 50)\n"]
+        lines.append("| 论文 | 年份 | 分数 | 来源 |")
+        lines.append("|------|------|------|------|")
+        for p in recent_sorted:
+            lines.append(f"| {_link(p)} | {_year(p)} | {p['relevance_score'] or 0} | {p['source_name'] or ''} |")
+        (vault_dir / "_最近入库.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        # ── 阅读进度 ──
+        status_groups: dict[str, list] = {"important": [], "reading": [], "to_read": [], "read": [], "unread": []}
+        for p in papers:
+            s = p["reading_status"] or "unread"
+            status_groups.setdefault(s, []).append(p)
+        display = {
+            "important": "⭐ 重要",
+            "reading": "📖 阅读中",
+            "to_read": "📋 待读",
+            "read": "✅ 已读",
+            "unread": "📥 未读",
+        }
+        lines = ["# 📖 阅读进度\n"]
+        lines.append("| 状态 | 数量 |")
+        lines.append("|------|------|")
+        for key, label in display.items():
+            lines.append(f"| {label} | {len(status_groups.get(key, []))} |")
+        lines.append("")
+        for key, label in display.items():
+            plist = status_groups.get(key, [])
+            if not plist:
+                continue
+            lines.append(f"## {label} ({len(plist)} 篇)\n")
+            for p in plist[:30]:
+                lines.append(f"- {_link(p)} (score: {p['relevance_score'] or 0})")
+            if len(plist) > 30:
+                lines.append(f"- ... 还有 {len(plist) - 30} 篇")
+            lines.append("")
+        (vault_dir / "_阅读进度.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
     # ── Dashboard ──
 
     def rebuild_dashboard(self) -> None:
-        """Regenerate .paper-agent/README.md as a human-readable dashboard."""
+        """Regenerate 00-Dashboard.md with Dataview queries for real-time stats."""
         if not self.is_initialized():
             return
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
         lines = [
-            "# Research Dashboard\n",
-            f"> Last updated: {now}\n",
+            "# 📊 Research Dashboard\n",
+            "> 此文件由 paper-agent 自动生成，数据由 Dataview 实时查询\n",
+            "## 📈 论文库概览\n",
+            "```dataview",
+            'TABLE length(rows) as "论文数"',
+            'FROM "02-论文库"',
+            'WHERE !startswith(file.name, "_")',
+            "GROUP BY status",
+            "SORT length(rows) DESC",
+            "```\n",
+            "## 📂 快速导航\n",
+            "- [[02-论文库/_高分论文|⭐ 高分论文]]",
+            "- [[02-论文库/_按方法分类|📊 按方法分类]]",
+            "- [[02-论文库/_按年份分布|📅 按年份分布]]",
+            "- [[02-论文库/_按会议分类|🏛️ 按来源分类]]",
+            "- [[02-论文库/_按分组分类|📂 按分组分类]]",
+            "- [[02-论文库/_最近入库|🆕 最近入库]]",
+            "- [[02-论文库/_阅读进度|📖 阅读进度]]",
+            "- [[阅读清单|📋 阅读清单]]",
+            "- [[研究日志|📝 研究日志]]",
+            "",
         ]
 
-        if self._storage:
-            stats = self._storage.get_reading_stats()
-            to_read = stats.get("to_read", 0)
-            reading = stats.get("reading", 0)
-            read = stats.get("read", 0)
-            important = stats.get("important", 0)
-            lines.append("## 阅读进度\n")
-            lines.append(
-                f"| 待读 | 阅读中 | 已读 | 重要 |\n"
-                f"|------|--------|------|------|\n"
-                f"| {to_read} | {reading} | {read} | {important} |\n"
-            )
-
-            groups = self._storage.list_groups()
-            lines.append("## 论文分组\n")
-            if groups:
-                for g in groups:
-                    safe = re.sub(r"[^\w\-]", "_", g["name"])
-                    lines.append(
-                        f"- [{g['name']}](collections/{safe}.md) "
-                        f"({g.get('paper_count', 0)} 篇)"
-                    )
-            else:
-                lines.append("(暂无分组)")
-            lines.append("")
-
-        notes_dir = self._root / "notes"
-        if notes_dir.is_dir():
-            note_files = sorted(notes_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
-            lines.append("## 最近笔记\n")
-            if note_files:
-                for f in note_files[:10]:
-                    lines.append(f"- [{f.stem}](notes/{f.name})")
-            else:
-                lines.append("(暂无笔记)")
-            lines.append("")
-
-        traces_dir = self._root / "citation-traces"
-        if traces_dir.is_dir():
-            trace_files = list(traces_dir.glob("*.md"))
-            if trace_files:
-                lines.append("## 引用链追踪\n")
-                for f in trace_files:
-                    lines.append(f"- [{f.stem}](citation-traces/{f.name})")
-                lines.append("")
-
-        journal_path = self._root / "research-journal.md"
-        if journal_path.exists():
-            text = journal_path.read_text(encoding="utf-8")
-            entries = re.findall(r"^### (.+)", text, re.MULTILINE)
-            lines.append("## 最近活动\n")
-            if entries:
-                for e in entries[:8]:
-                    lines.append(f"- {e}")
-            else:
-                lines.append("(暂无活动)")
-            lines.append("")
-
+        # List reports from each directory
         report_dirs = {
-            "daily": "每日摘要",
-            "triage": "筛选报告",
-            "survey": "文献综述",
-            "insight": "趋势洞察",
-            "compare": "对比分析",
-            "reading-packs": "阅读包",
-            "ideas": "研究 Ideas",
-            "experiment-plans": "实验计划",
-            "search-results": "搜索结果",
+            "01-每日推荐": "📅 每日推荐",
+            "05-文献综述": "📚 文献综述",
+            "04-对比分析": "⚖️ 对比分析",
+            "03-深度分析": "📝 深度分析",
+            "06-趋势洞察": "📊 趋势洞察",
+            "07-阅读包": "📦 阅读包",
+            "08-研究Ideas": "💡 研究 Ideas",
+            "09-实验计划": "🧪 实验计划",
+            "10-引用追踪": "🔗 引用追踪",
+            "12-搜索结果": "🔍 搜索结果",
+            "13-筛选报告": "📋 筛选报告",
         }
         has_reports = False
         for subdir, label in report_dirs.items():
             d = self._root / subdir
             if d.is_dir():
-                files = sorted(d.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+                files = sorted(
+                    [f for f in d.glob("*.md") if not f.name.startswith("_")],
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
                 if files:
                     if not has_reports:
-                        lines.append("## 研究报告\n")
+                        lines.append("## 📄 研究报告\n")
                         has_reports = True
                     lines.append(f"### {label} ({len(files)} 份)\n")
                     for f in files[:5]:
-                        lines.append(f"- [{f.stem}]({subdir}/{f.name})")
+                        lines.append(f"- [[{subdir}/{f.stem}]]")
                     if len(files) > 5:
                         lines.append(f"- ... 还有 {len(files) - 5} 份")
                     lines.append("")
-        if not has_reports:
-            lines.append("## 研究报告\n")
-            lines.append("(暂无报告)")
-            lines.append("")
+
+        # Collections — Dataview query for real-time group list
+        lines.append("## 📁 论文分组\n")
+        lines.append("```dataview")
+        lines.append('TABLE length(rows) as "论文数"')
+        lines.append('FROM "02-论文库"')
+        lines.append('WHERE !startswith(file.name, "_") AND groups')
+        lines.append("FLATTEN groups as grp")
+        lines.append("GROUP BY grp")
+        lines.append("SORT length(rows) DESC")
+        lines.append("```")
+        lines.append("")
+
+        # Journal recent
+        journal_path = self._root / self.JOURNAL_FILE
+        if journal_path.exists():
+            text = journal_path.read_text(encoding="utf-8")
+            entries = re.findall(r"^### (.+)", text, re.MULTILINE)
+            if entries:
+                lines.append("## 🕐 最近活动\n")
+                for e in entries[:8]:
+                    lines.append(f"- {e}")
+                lines.append("")
 
         lines.append("---\n")
         lines.append("*此文件由 paper-agent 自动生成，请勿手动编辑。*\n")
 
-        (self._root / "README.md").write_text("\n".join(lines), encoding="utf-8")
+        (self._root / self.DASHBOARD_FILE).write_text("\n".join(lines), encoding="utf-8")
 
     # ── Journal ──
 
     def append_journal(self, summary: str, details: dict[str, Any] | None = None) -> None:
         if not self.is_initialized():
             return
-        path = self._root / "research-journal.md"
+        path = self._root / self.JOURNAL_FILE
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M")
@@ -272,12 +772,12 @@ class WorkspaceManager:
 
         entry_count = len(re.findall(r"^### \d{2}:\d{2}", content, re.MULTILINE))
         header = (
-            f"# Research Journal\n\n"
+            f"# 研究日志\n\n"
             f"> Last updated: {now.strftime('%Y-%m-%d %H:%M')}\n"
             f"> Entries: {entry_count} (max 50, auto-archived)\n"
         )
         content = re.sub(
-            r"^# Research Journal.*?(?=\n## |\Z)",
+            r"^# 研究日志.*?(?=\n## |\Z)",
             header,
             content,
             count=1,
@@ -301,7 +801,7 @@ class WorkspaceManager:
 
         path.write_text(header + "".join(keep), encoding="utf-8")
 
-        archive_path = self._root / "research-journal-archive.md"
+        archive_path = self._root / "研究日志-归档.md"
         existing = archive_path.read_text(encoding="utf-8") if archive_path.exists() else ""
         archive_path.write_text(existing + "\n".join(archive), encoding="utf-8")
 
@@ -317,16 +817,21 @@ class WorkspaceManager:
         papers = self._storage.get_papers_by_reading_status(limit=500)
         for p in papers:
             if p.reading_status and p.reading_status in sections:
-                line = f"- [{p.title}]({p.url}) `{p.id}` — {p.source_name}"
+                line = f"- [[02-论文库/{self._paper_filename(p)}|{p.title}]]"
                 if p.relevance_score:
                     line += f" (score: {p.relevance_score:.1f})"
                 sections[p.reading_status].append(line)
 
         lines = [
-            "# Reading List\n",
+            "# 阅读清单\n",
             f"> Auto-generated from database. Last synced: {now}\n",
         ]
-        display = {"important": "Important", "reading": "Reading", "to_read": "To Read", "read": "Read"}
+        display = {
+            "important": "⭐ 重要",
+            "reading": "📖 阅读中",
+            "to_read": "📋 待读",
+            "read": "✅ 已读",
+        }
         for key, label in display.items():
             lines.append(f"\n## {label}\n")
             if sections[key]:
@@ -335,7 +840,7 @@ class WorkspaceManager:
                 lines.append("(none)")
             lines.append("")
 
-        (self._root / "reading-list.md").write_text("\n".join(lines), encoding="utf-8")
+        (self._root / self.READING_LIST_FILE).write_text("\n".join(lines), encoding="utf-8")
 
     # ── Notes ──
 
@@ -367,7 +872,7 @@ class WorkspaceManager:
             lines.append(note["content"])
             lines.append("")
 
-        path = self._root / "notes" / f"{paper_id}.md"
+        path = self._root / "03-深度分析" / f"{paper_id}.md"
         path.write_text("\n".join(lines), encoding="utf-8")
         return path
 
@@ -383,21 +888,21 @@ class WorkspaceManager:
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
         lines = [
-            f"# Collection: {name}\n",
+            f"# 分组: {name}\n",
             f"> {group.get('description', '')}",
             f"> Papers: {len(papers)} | Last synced: {now}\n",
         ]
         for p in papers:
-            line = f"- [{p.title}]({p.url}) `{p.id}`"
+            line = f"- [[02-论文库/{self._paper_filename(p)}|{p.title}]]"
             if p.relevance_score:
                 line += f" (score: {p.relevance_score:.1f})"
             lines.append(line)
 
         if not papers:
-            lines.append("(no papers yet)")
+            lines.append("(暂无论文)")
 
         safe_name = re.sub(r"[^\w\-]", "_", name)
-        path = self._root / "collections" / f"{safe_name}.md"
+        path = self._root / "11-论文分组" / f"{safe_name}.md"
         path.write_text("\n".join(lines), encoding="utf-8")
 
         self.rebuild_collection_index()
@@ -409,20 +914,20 @@ class WorkspaceManager:
         groups = self._storage.list_groups()
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         lines = [
-            "# Paper Collections\n",
+            "# 论文分组\n",
             f"> Auto-generated index. Last synced: {now}\n",
         ]
         if groups:
             for g in groups:
                 safe = re.sub(r"[^\w\-]", "_", g["name"])
                 lines.append(
-                    f"- [{g['name']}]({safe}.md) — {g.get('description', '')} "
+                    f"- [[11-论文分组/{safe}|{g['name']}]] — {g.get('description', '')} "
                     f"({g.get('paper_count', 0)} papers)"
                 )
         else:
-            lines.append("(no collections yet)")
+            lines.append("(暂无分组)")
 
-        (self._root / "collections" / "_index.md").write_text(
+        (self._root / "11-论文分组" / "_index.md").write_text(
             "\n".join(lines), encoding="utf-8"
         )
 
@@ -440,7 +945,7 @@ class WorkspaceManager:
             return None
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         safe_name = re.sub(r"[^\w\-]", "_", trace_name)
-        path = self._root / "citation-traces" / f"{safe_name}.md"
+        path = self._root / "10-引用追踪" / f"{safe_name}.md"
 
         new_section = [
             f"\n## {paper_title} `{paper_id}` ({now})\n",
@@ -464,7 +969,7 @@ class WorkspaceManager:
                 content = existing[:header_end] + "\n".join(new_section) + existing[header_end:]
         else:
             content = (
-                f"# Citation Trace: {trace_name}\n\n"
+                f"# 引用追踪: {trace_name}\n\n"
                 f"> Last updated: {now}\n"
                 + "\n".join(new_section)
             )
@@ -508,13 +1013,13 @@ class WorkspaceManager:
         path.write_text(content, encoding="utf-8")
 
         label_map = {
-            "daily_digest": "每日摘要",
+            "daily_digest": "每日推荐",
             "triage": "筛选报告",
             "survey": "文献综述",
             "insight": "趋势洞察",
             "comparison": "对比分析",
             "analysis": "深度分析",
-            "citation_map": "引用图谱",
+            "citation_map": "引用追踪",
             "reading_pack": "阅读包",
             "ideation": "研究 Ideas",
             "experiment_plan": "实验计划",
@@ -528,10 +1033,7 @@ class WorkspaceManager:
         return path
 
     def list_reports(self, report_type: str | None = None) -> list[dict[str, Any]]:
-        """List saved reports, optionally filtered by type.
-
-        Returns a list of dicts with keys: type, filename, path, modified.
-        """
+        """List saved reports, optionally filtered by type."""
         if not self.is_initialized():
             return []
 
@@ -567,7 +1069,7 @@ class WorkspaceManager:
         if not self.is_initialized():
             return result
 
-        journal_path = self._root / "research-journal.md"
+        journal_path = self._root / self.JOURNAL_FILE
         if journal_path.exists():
             text = journal_path.read_text(encoding="utf-8")
             entries = re.findall(r"^### .+", text, re.MULTILINE)
@@ -580,7 +1082,7 @@ class WorkspaceManager:
             {"name": g["name"], "papers": g.get("paper_count", 0)} for g in groups
         ]
 
-        traces_dir = self._root / "citation-traces"
+        traces_dir = self._root / "10-引用追踪"
         if traces_dir.is_dir():
             result["citation_traces"] = [
                 f.stem for f in traces_dir.glob("*.md")
@@ -622,3 +1124,22 @@ class WorkspaceManager:
             "collections": len(groups),
             "notes": len(papers_with_notes),
         }
+
+    # ── Helpers ──
+
+    @staticmethod
+    def _paper_filename(paper) -> str:  # type: ignore[no-untyped-def]
+        """Generate a clean, human-readable filename for a paper (without .md).
+
+        Format: Title_Slug_YYYY-MM-DD
+        """
+        title_slug = re.sub(r"[^\w\s-]", "", paper.title)[:80].strip().replace(" ", "_")
+        date_str = ""
+        if paper.published_at:
+            date_str = f"_{paper.published_at.strftime('%Y-%m-%d')}"
+        return (title_slug or paper.id[:12]) + date_str
+
+    def paper_wikilink(self, paper) -> str:  # type: ignore[no-untyped-def]
+        """Return an Obsidian wikilink string for a paper: [[02-论文库/filename|title]]."""
+        fname = self._paper_filename(paper)
+        return f"[[02-论文库/{fname}|{paper.title}]]"
