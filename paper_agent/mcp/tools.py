@@ -108,34 +108,54 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         queries: list[str],
         limit_per_query: int = 20,
         diverse: bool = False,
+        page: int = 1,
+        page_size: int = 10,
     ) -> str:
-        """Search for multiple topics/directions at once. Returns results grouped by query.
+        """Search for multiple topics/directions at once. Returns compact results grouped by query.
 
         Use this instead of calling paper_search repeatedly when:
         - The user wants to survey multiple research directions
         - The user asks "compare these N topics" or "each direction pick M papers"
         - You need papers from several keyword groups for a literature survey
 
-        Each query is searched independently; a failure in one query does NOT
-        affect the others.
+        Returns COMPACT format (title + first author + year + 120-char snippet) to
+        keep response size small. Use paper_get(id) for full abstract/metadata on
+        specific papers of interest.
 
         Args:
-            queries: List of search queries (one per topic/direction).
-            limit_per_query: Max papers to return per query (default 20).
+            queries: List of search queries (one per topic/direction). Max 20 queries.
+            limit_per_query: Max papers per query (default 20, max 30).
             diverse: If True, auto-expand keywords via synonyms for each query.
+            page: Page number for paginating across queries (default 1).
+            page_size: Number of queries per page (default 10, max 20).
 
         Returns:
-            JSON object with results grouped by query, plus aggregate totals.
+            JSON with compact paper list grouped by query, plus pagination info.
         """
+        # Guard rails to prevent token explosion
+        queries = queries[:20]
+        limit_per_query = min(limit_per_query, 30)
+        page_size = min(page_size, 20)
+
+        # Paginate queries
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_queries = queries[start:end]
+        total_pages = max(1, -(-len(queries) // page_size))  # ceil division
+
         groups: list[dict[str, Any]] = []
         total_papers = 0
-        for q in queries:
+        seen_ids: set[str] = set()  # Cross-query dedup
+        for q in page_queries:
             try:
                 result = ctx.search_engine.search(q, limit=limit_per_query, diverse=diverse)
-                papers = [p.to_summary_dict() for p in result.papers]
+                papers = []
+                for p in result.papers:
+                    if p.id not in seen_ids:
+                        seen_ids.add(p.id)
+                        papers.append(p.to_batch_dict())
                 groups.append({
                     "query": q,
-                    "status": result.status,
                     "count": len(papers),
                     "papers": papers,
                 })
@@ -143,16 +163,22 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             except Exception as e:
                 groups.append({
                     "query": q,
-                    "status": "error",
                     "count": 0,
                     "papers": [],
                     "error": str(e),
                 })
+
+        note = "Compact format. Use paper_get(id) for full details."
+        if total_pages > 1:
+            note += f" Page {page}/{total_pages} — call with page={page + 1} for next batch."
+
         return json.dumps({
-            "status": "completed",
-            "total_queries": len(queries),
-            "total_papers": total_papers,
             "groups": groups,
+            "total_papers": total_papers,
+            "page": page,
+            "total_pages": total_pages,
+            "total_queries": len(queries),
+            "note": note,
         }, ensure_ascii=False, default=str)
 
     @mcp.tool()
@@ -251,11 +277,22 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             JSON object with library statistics.
         """
         total = ctx.storage.count_papers()
-        papers = ctx.storage.get_all_papers(limit=10000)
-        high = sum(1 for p in papers if p.relevance_band == "high")
-        low = sum(1 for p in papers if p.relevance_band == "low")
-        unscored = sum(1 for p in papers if not p.relevance_band)
+        # Use SQL counts instead of loading all papers
+        try:
+            high = ctx.storage.conn.execute(
+                "SELECT COUNT(*) FROM papers WHERE relevance_band = 'high'"
+            ).fetchone()[0]
+            low = ctx.storage.conn.execute(
+                "SELECT COUNT(*) FROM papers WHERE relevance_band = 'low'"
+            ).fetchone()[0]
+            unscored = ctx.storage.conn.execute(
+                "SELECT COUNT(*) FROM papers WHERE relevance_band = '' OR relevance_band IS NULL"
+            ).fetchone()[0]
+        except Exception:
+            high = low = unscored = 0
 
+        # Only load a sample for topic analysis
+        papers = ctx.storage.get_all_papers(limit=500)
         all_topics: list[str] = []
         for p in papers:
             all_topics.extend(p.topics)
@@ -512,7 +549,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         """
         stats = ctx.storage.get_reading_stats()
         papers_by_status: dict[str, list[dict]] = {}
-        for s in ("important", "reading", "to_read"):
+        for s in ("important", "reading", "to_read", "read"):
             papers = ctx.storage.get_papers_by_reading_status(s, limit=10)
             papers_by_status[s] = [
                 {"id": p.id, "title": p.title, "score": p.relevance_score}
@@ -830,32 +867,63 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
 
         comparison: list[dict[str, Any]] = []
         for p in found:
+            # Try to get PaperProfile for richer comparison data
+            profile = ctx.storage.get_paper_profile(p.id)
+            meta = p.metadata or {}
+
             entry: dict[str, Any] = {
                 "id": p.id,
                 "title": p.title,
-                "authors": p.authors,
+                "authors": p.authors[:5] + (["et al."] if len(p.authors) > 5 else []),
                 "published_at": p.published_at.isoformat() if p.published_at else None,
                 "url": p.url,
+                "venue": p.venue or meta.get("venue", ""),
+                "citation_count": p.citation_count or meta.get("citation_count"),
             }
             if "method" in selected:
-                entry["method"] = {
+                method_data: dict[str, Any] = {
                     "methodology_tags": p.methodology_tags,
                     "abstract_excerpt": p.abstract[:500] if p.abstract else "",
                 }
+                if profile:
+                    method_data.update({
+                        "method_family": profile.method_family,
+                        "method_name": profile.method_name,
+                        "novelty_claim": profile.novelty_claim,
+                        "problem_formulation": profile.problem_formulation,
+                        "key_contributions": profile.key_contributions,
+                    })
+                entry["method"] = method_data
             if "result" in selected:
-                entry["result"] = {
+                result_data: dict[str, Any] = {
                     "relevance_score": p.relevance_score,
                     "topics": p.topics,
                 }
+                if profile:
+                    result_data.update({
+                        "datasets": profile.datasets,
+                        "baselines": profile.baselines,
+                        "metrics": profile.metrics,
+                        "best_results": profile.best_results,
+                    })
+                entry["result"] = result_data
             if "application" in selected:
                 entry["application"] = {
                     "research_objectives": p.research_objectives,
                     "topics": p.topics,
+                    "task": profile.task if profile else "",
                 }
             if "architecture" in selected:
-                entry["architecture"] = {
+                arch_data: dict[str, Any] = {
                     "methodology_tags": p.methodology_tags,
                 }
+                if profile:
+                    arch_data.update({
+                        "compute_cost": profile.compute_cost,
+                        "code_url": profile.code_url,
+                        "limitations": profile.limitations,
+                    })
+                entry["architecture"] = arch_data
             comparison.append(entry)
 
         return json.dumps({
@@ -892,19 +960,54 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
         if format == "bibtex":
             entries: list[str] = []
             for p in found:
-                cite_key = p.source_paper_id.replace(".", "_") if p.source_paper_id else p.id
-                author_str = " and ".join(p.authors) if p.authors else "Unknown"
+                meta = p.metadata or {}
+                # Generate AuthorYear cite key (e.g. "Zhang2024" or "Zhang2024placement")
+                first_author_last = p.authors[0].split()[-1] if p.authors else "Unknown"
                 year = str(p.published_at.year) if p.published_at else ""
-                entry = (
-                    f"@article{{{cite_key},\n"
-                    f"  title   = {{{p.title}}},\n"
-                    f"  author  = {{{author_str}}},\n"
-                    f"  year    = {{{year}}},\n"
-                    f"  url     = {{{p.url}}},\n"
-                    f"  note    = {{arXiv:{p.source_paper_id}}}\n"
-                    f"}}"
-                )
-                entries.append(entry)
+                # Add first topic word for disambiguation
+                topic_word = p.topics[0].replace(" ", "").lower()[:10] if p.topics else ""
+                cite_key = f"{first_author_last}{year}{topic_word}"
+                # Sanitize cite_key
+                cite_key = "".join(c for c in cite_key if c.isalnum() or c == "_")
+
+                author_str = " and ".join(p.authors) if p.authors else "Unknown"
+                venue = p.venue or meta.get("venue", "")
+                doi = p.doi or meta.get("doi", "")
+
+                # Determine entry type: inproceedings for conferences, article for journals
+                venue_lower = venue.lower()
+                is_conference = any(kw in venue_lower for kw in [
+                    "neurips", "nips", "icml", "iclr", "cvpr", "iccv", "eccv",
+                    "aaai", "ijcai", "acl", "emnlp", "kdd", "www", "sigir",
+                    "dac", "iccad", "date", "asp-dac", "ispd", "fpga",
+                    "icse", "fse", "osdi", "sosp", "sigmod", "vldb",
+                    "proceedings", "conference", "workshop", "symposium",
+                ])
+
+                if is_conference:
+                    entry_lines = [f"@inproceedings{{{cite_key},"]
+                    entry_lines.append(f"  title     = {{{p.title}}},")
+                    entry_lines.append(f"  author    = {{{author_str}}},")
+                    entry_lines.append(f"  year      = {{{year}}},")
+                    if venue:
+                        entry_lines.append(f"  booktitle = {{{venue}}},")
+                else:
+                    entry_lines = [f"@article{{{cite_key},"]
+                    entry_lines.append(f"  title   = {{{p.title}}},")
+                    entry_lines.append(f"  author  = {{{author_str}}},")
+                    entry_lines.append(f"  year    = {{{year}}},")
+                    if venue:
+                        entry_lines.append(f"  journal = {{{venue}}},")
+
+                if doi:
+                    entry_lines.append(f"  doi     = {{{doi}}},")
+                if p.url:
+                    entry_lines.append(f"  url     = {{{p.url}}},")
+                if p.source_name == "arxiv" and p.source_paper_id:
+                    entry_lines.append(f"  eprint  = {{{p.source_paper_id}}},")
+                    entry_lines.append(f"  archiveprefix = {{arXiv}},")
+                entry_lines.append(f"}}")
+                entries.append("\n".join(entry_lines))
             content = "\n\n".join(entries)
 
         elif format == "markdown":
@@ -919,7 +1022,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                 lines.append(f"   - Year: {year}")
                 lines.append(f"   - URL: {p.url}")
                 if p.abstract:
-                    lines.append(f"   - Abstract: {p.abstract[:200]}...")
+                    lines.append(f"   - Abstract: {p.abstract[:400]}...")
                 lines.append("")
             content = "\n".join(lines)
 
@@ -1036,21 +1139,6 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                 meta = p.metadata or {}
                 pdf_url: str | None = None
 
-                if arxiv_id:
-                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-                elif meta.get("pdf_url"):
-                    pdf_url = meta["pdf_url"]
-                elif meta.get("doi"):
-                    pdf_url = f"https://doi.org/{meta['doi']}"
-
-                if not pdf_url:
-                    results.append({
-                        "id": p.id, "title": p.title,
-                        "status": "skipped",
-                        "reason": "No arXiv ID or open-access PDF URL available",
-                    })
-                    continue
-
                 file_id = arxiv_id or p.source_paper_id or p.id
                 file_id = re.sub(r"[/\\:]", "_", file_id)
                 safe_name = re.sub(r"[^\w\s-]", "", p.title)[:80].strip().replace(" ", "_")
@@ -1064,24 +1152,48 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                     })
                     continue
 
-                try:
-                    resp = client.get(pdf_url)
-                    if resp.status_code == 200 and len(resp.content) > 1000:
-                        filepath.write_bytes(resp.content)
-                        results.append({
-                            "id": p.id, "title": p.title,
-                            "status": "downloaded", "path": str(filepath),
-                        })
-                    else:
-                        results.append({
-                            "id": p.id, "title": p.title,
-                            "status": "failed",
-                            "reason": f"HTTP {resp.status_code}, size={len(resp.content)}",
-                        })
-                except Exception as exc:
+                candidate_urls: list[str] = []
+                if arxiv_id:
+                    candidate_urls.append(f"https://arxiv.org/pdf/{arxiv_id}.pdf")
+                if meta.get("pdf_url"):
+                    candidate_urls.append(meta["pdf_url"])
+                if meta.get("doi"):
+                    candidate_urls.append(f"https://doi.org/{meta['doi']}")
+
+                if not candidate_urls:
                     results.append({
                         "id": p.id, "title": p.title,
-                        "status": "failed", "reason": str(exc),
+                        "status": "skipped",
+                        "reason": "No arXiv ID, open-access PDF URL, or DOI available",
+                    })
+                    continue
+
+                downloaded = False
+                last_reason = ""
+                for url in candidate_urls:
+                    try:
+                        resp = client.get(url, timeout=30.0)
+                        content_type = resp.headers.get("content-type", "")
+                        if resp.status_code == 200 and len(resp.content) > 1000 and "pdf" in content_type.lower():
+                            filepath.write_bytes(resp.content)
+                            results.append({
+                                "id": p.id, "title": p.title,
+                                "status": "downloaded", "path": str(filepath),
+                            })
+                            downloaded = True
+                            break
+                        elif resp.status_code == 200 and "html" in content_type.lower():
+                            last_reason = "Publisher page (paywall), not a PDF"
+                        else:
+                            last_reason = f"HTTP {resp.status_code}, content-type={content_type}"
+                    except Exception as exc:
+                        last_reason = str(exc)
+
+                if not downloaded:
+                    results.append({
+                        "id": p.id, "title": p.title,
+                        "status": "skipped",
+                        "reason": last_reason or "All download URLs failed",
                     })
         finally:
             client.close()
@@ -1375,23 +1487,33 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                         authors = [a.get("name", "") for a in (hit.get("authors") or [])]
                         year = hit.get("year")
 
+                        oa = hit.get("openAccessPdf")
+                        oa_url = oa.get("url") if isinstance(oa, dict) else ""
+                        venue = hit.get("venue") or ""
+
                         paper_obj = Paper(
                             id="",
                             canonical_key=f"arxiv:{arxiv_id}" if arxiv_id else f"s2:{hit['paperId']}",
-                            source="semantic_scholar",
+                            source_name="semantic_scholar",
                             source_paper_id=arxiv_id or hit["paperId"],
                             title=hit_title,
                             authors=authors,
                             abstract=hit.get("abstract") or "",
                             url=hit.get("url") or "",
                             published_at=datetime(year, 1, 1) if year else None,
+                            metadata={
+                                "s2_id": hit["paperId"],
+                                "arxiv_id": arxiv_id,
+                                "doi": doi,
+                                "pdf_url": oa_url,
+                                "venue": venue,
+                            },
                         )
 
                         if arxiv_id:
                             pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-                        oa = hit.get("openAccessPdf")
-                        if oa and oa.get("url"):
-                            pdf_url = pdf_url or oa["url"]
+                        if oa_url:
+                            pdf_url = pdf_url or oa_url
 
                         result["matched_via"] = "semantic_scholar"
                         break
@@ -1571,7 +1693,7 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
                 "year": p.published_at.year if p.published_at else None,
                 "score": round(p.relevance_score, 1) if p.relevance_score else None,
                 "source": p.source_name,
-                "abstract_snippet": (p.abstract or "")[:200],
+                "abstract_snippet": (p.abstract or "")[:400],
             })
 
         return json.dumps({
@@ -1632,13 +1754,26 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
 
         for p in papers:
             score = p.relevance_score or 0
+            abstract_snippet = ""
+            if p.abstract:
+                abstract_snippet = p.abstract[:300] + "..." if len(p.abstract) > 300 else p.abstract
+            authors_short = p.authors[:3] + (["et al."] if len(p.authors) > 3 else [])
+            meta = p.metadata or {}
             entry = {
                 "id": p.id,
                 "title": p.title,
+                "authors": authors_short,
                 "score": round(score, 1),
                 "reason": p.recommendation_reason or "",
+                "abstract_snippet": abstract_snippet,
+                "url": p.url,
                 "source": p.source_name,
                 "year": p.published_at.year if p.published_at else None,
+                "topics": p.topics,
+                "methodology_tags": p.methodology_tags,
+                "venue": p.venue or meta.get("venue", ""),
+                "citation_count": p.citation_count or meta.get("citation_count"),
+                "pdf_url": p.pdf_url or meta.get("pdf_url"),
             }
             if score >= 8:
                 important.append(entry)
@@ -2221,10 +2356,14 @@ def register_tools(mcp: FastMCP, ctx: AppContext) -> None:
             reading_titles = [p.title for p in group_papers]
 
         recommendations: list[dict[str, Any]] = []
-        for paper in papers[:n * 2]:
-            explanation = ctx.llm.explain_relevance(
-                paper, research_ctx, reading_titles or None
-            )
+        candidates = papers[:n * 2]
+        for paper in candidates:
+            try:
+                explanation = ctx.llm.explain_relevance(
+                    paper, research_ctx, reading_titles or None
+                )
+            except Exception:
+                explanation = paper.recommendation_reason or "Relevant to your research context."
             recommendations.append({
                 "id": paper.id,
                 "title": paper.title,

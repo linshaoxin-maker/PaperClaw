@@ -54,6 +54,9 @@ class ExtractionEngine:
             venue=raw.get("venue", ""),
             compute_cost=raw.get("compute_cost"),
             limitations=raw.get("limitations", []),
+            novelty_claim=raw.get("novelty_claim", ""),
+            problem_formulation=raw.get("problem_formulation", ""),
+            key_contributions=raw.get("key_contributions", []),
             extracted_from=extracted_from,
         )
 
@@ -89,7 +92,8 @@ class ExtractionEngine:
         if not profiles:
             return {"error": "No profiles found. Run paper_extract first.", "missing": missing}
 
-        headers = ["paper_id", "task", "method", "datasets", "baselines", "metrics",
+        headers = ["paper_id", "task", "method", "novelty", "problem",
+                    "datasets", "baselines", "metrics",
                     "best_results", "code", "venue", "compute_cost"]
         rows = [p.to_comparison_row() for p in profiles]
 
@@ -133,6 +137,9 @@ _PROFILE_SCHEMA = {
     "task": "The main task or problem being addressed (e.g. 'VLSI placement', 'image classification')",
     "method_family": "The broad method family (e.g. 'reinforcement learning', 'graph neural network', 'transformer')",
     "method_name": "The specific method or algorithm name (e.g. 'DREAMPlace', 'ResNet-50')",
+    "novelty_claim": "One-sentence novelty claim — what is new about this work? (e.g. 'First to apply GNN to macro placement with wirelength-aware loss')",
+    "problem_formulation": "How the problem is formulated (e.g. 'placement as sequential decision making via RL', 'routing as ILP with congestion constraints')",
+    "key_contributions": "List of 2-4 key contributions claimed by the authors (e.g. ['novel loss function for wirelength', 'GPU-accelerated global placement'])",
     "datasets": "List of datasets or benchmarks used (e.g. ['ISPD2005', 'ICCAD2015'])",
     "baselines": "List of baseline methods compared against (e.g. ['ePlace', 'RePlAce'])",
     "metrics": "List of evaluation metrics (e.g. ['HPWL', 'runtime', 'accuracy'])",

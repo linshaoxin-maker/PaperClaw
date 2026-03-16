@@ -2,10 +2,14 @@
 description: Compare multiple papers side by side — methods, results, architecture
 allowed-tools: [
   "mcp__paper-agent__paper_search",
+  "mcp__paper-agent__paper_show",
   "mcp__paper-agent__paper_batch_show",
   "mcp__paper-agent__paper_compare",
+  "mcp__paper-agent__paper_compare_table",
+  "mcp__paper-agent__paper_extract",
   "mcp__paper-agent__paper_export",
   "mcp__paper-agent__paper_save_report",
+  "mcp__paper-agent__paper_credibility",
   "Write"
 ]
 ---

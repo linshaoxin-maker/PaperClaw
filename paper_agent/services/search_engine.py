@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 from paper_agent.app.config_manager import ConfigProfile
 from paper_agent.domain.models.paper import Paper
@@ -20,6 +21,7 @@ from paper_agent.infra.storage.sqlite_storage import SQLiteStorage
 # ── Synonym / abbreviation map (bidirectional) ──
 
 _SYNONYM_GROUPS: list[list[str]] = [
+    # ── Deep learning fundamentals ──
     ["GNN", "graph neural network"],
     ["CNN", "convolutional neural network"],
     ["RNN", "recurrent neural network"],
@@ -33,6 +35,19 @@ _SYNONYM_GROUPS: list[list[str]] = [
     ["diffusion model", "denoising diffusion"],
     ["BERT", "bidirectional encoder representations"],
     ["GPT", "generative pre-trained transformer"],
+    ["GCN", "graph convolutional network"],
+    ["MLP", "multilayer perceptron"],
+    ["KG", "knowledge graph"],
+    ["RAG", "retrieval augmented generation"],
+    ["ViT", "vision transformer"],
+    ["DNN", "deep neural network"],
+    ["federated learning", "FL"],
+    ["contrastive learning", "SimCLR", "MoCo"],
+    ["graph transformer", "graph attention"],
+    ["zero-shot", "zero shot learning"],
+    ["few-shot", "few shot learning"],
+    ["meta-learning", "learning to learn"],
+    # ── EDA / chip design ──
     ["EDA", "electronic design automation"],
     ["VLSI", "very large scale integration"],
     ["HLS", "high-level synthesis"],
@@ -41,20 +56,40 @@ _SYNONYM_GROUPS: list[list[str]] = [
     ["DRC", "design rule checking"],
     ["netlist", "circuit netlist"],
     ["floorplan", "floorplanning"],
-    ["GCN", "graph convolutional network"],
-    ["MLP", "multilayer perceptron"],
-    ["KG", "knowledge graph"],
-    ["RAG", "retrieval augmented generation"],
-    ["ViT", "vision transformer"],
     ["FPGA", "field programmable gate array"],
     ["ASIC", "application specific integrated circuit"],
-    ["DNN", "deep neural network"],
-    ["federated learning", "FL"],
-    ["contrastive learning", "SimCLR", "MoCo"],
-    ["graph transformer", "graph attention"],
-    ["zero-shot", "zero shot learning"],
-    ["few-shot", "few shot learning"],
-    ["meta-learning", "learning to learn"],
+    # ── LLM agents & tool use ──
+    ["LLM agent", "language model agent", "AI agent"],
+    ["tool use", "tool calling", "function calling", "tool-augmented LLM"],
+    ["MCP", "Model Context Protocol", "model context protocol"],
+    ["agentic AI", "autonomous agent", "AI agent system"],
+    ["multi-agent", "multi agent system", "agent collaboration"],
+    ["agent framework", "agent orchestration"],
+    ["ReAct", "reasoning and acting", "chain-of-thought agent"],
+    ["code agent", "coding agent", "software agent"],
+    ["web agent", "browser agent", "GUI agent"],
+    # ── Agent memory & learning ──
+    ["agent memory", "memory-augmented agent", "memory module"],
+    ["episodic memory", "episodic recall", "event memory"],
+    ["procedural memory", "skill memory", "action memory"],
+    ["working memory", "context window management"],
+    ["long-term memory", "persistent memory", "external memory"],
+    ["memory retrieval", "memory consolidation"],
+    ["lifelong learning", "continual learning", "never-ending learning"],
+    ["self-evolving agent", "self-improving agent", "adaptive agent"],
+    ["experience replay", "experience-driven learning"],
+    ["skill acquisition", "skill learning", "skill evolution"],
+    ["in-context learning", "ICL", "few-shot prompting"],
+    # ── Agent evaluation & safety ──
+    ["agent benchmark", "AgentBench", "agent evaluation"],
+    ["prompt injection", "jailbreak", "adversarial prompt"],
+    ["tool poisoning", "malicious tool", "tool security"],
+    ["agent safety", "AI safety", "alignment"],
+    ["hallucination", "factual grounding", "faithfulness"],
+    # ── RAG & retrieval ──
+    ["retrieval augmented generation", "RAG", "grounded generation"],
+    ["dense retrieval", "neural retrieval", "semantic search"],
+    ["knowledge base", "external knowledge", "knowledge retrieval"],
 ]
 
 _SYNONYM_MAP: dict[str, list[str]] = {}
@@ -96,9 +131,11 @@ class SearchEngine:
         self,
         storage: SQLiteStorage,
         profile: ConfigProfile | None = None,
+        feedback_manager: Any | None = None,
     ) -> None:
         self._storage = storage
         self._profile = profile
+        self._feedback_manager = feedback_manager
 
     def update_profile(self, profile: ConfigProfile) -> None:
         self._profile = profile
@@ -251,10 +288,18 @@ class SearchEngine:
         return sorted(papers, key=lambda p: p.relevance_score, reverse=True)
 
     def _rerank(self, papers: list[Paper]) -> list[Paper]:
-        """Re-score papers using profile topics/keywords + recency + LLM score."""
+        """Re-score papers using profile topics/keywords + recency + LLM score + feedback."""
         assert self._profile is not None
         profile_topics = {t.lower() for t in self._profile.topics}
         profile_keywords = {k.lower() for k in self._profile.keywords}
+
+        # Get feedback adjustments if available
+        feedback_weights: dict[str, float] = {}
+        if self._feedback_manager:
+            try:
+                feedback_weights = self._feedback_manager.get_adjusted_topic_weights()
+            except Exception:
+                pass
 
         scored: list[tuple[float, Paper]] = []
         for i, p in enumerate(papers):
@@ -272,12 +317,21 @@ class SearchEngine:
 
             llm_score = min(p.relevance_score / 10.0, 1.0) if p.relevance_score else 0.0
 
+            # Apply feedback offset (normalized to 0-1 range)
+            feedback_offset = 0.0
+            if feedback_weights:
+                for topic in p.topics:
+                    if topic.lower() in feedback_weights:
+                        feedback_offset += feedback_weights[topic.lower()]
+                feedback_offset = max(-0.2, min(0.2, feedback_offset))
+
             final = (
-                0.35 * fts_score
+                0.30 * fts_score
                 + 0.20 * topic_score
                 + 0.20 * kw_score
                 + 0.15 * llm_score
                 + 0.10 * recency_score
+                + 0.05 + feedback_offset  # base + feedback adjustment
             )
             scored.append((final, p))
 

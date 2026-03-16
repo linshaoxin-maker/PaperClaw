@@ -211,19 +211,63 @@ class ArxivAdapter(SourceAdapter):
             if term:
                 categories.append(term)
 
-        url = ""
+        # Extract additional arXiv metadata
+        pdf_url = ""
+        url = f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else ""
         for link_el in entry.findall(f"{ATOM_NS}link"):
-            if link_el.get("type") == "text/html":
-                url = link_el.get("href", "")
+            if link_el.get("title") == "pdf":
+                pdf_url = link_el.get("href", "")
                 break
-        if not url and arxiv_id:
-            url = f"https://arxiv.org/abs/{arxiv_id}"
+        if not pdf_url and arxiv_id:
+            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+
+        # Updated date (arXiv papers can be revised)
+        updated_at_str = ""
+        upd_el = entry.find(f"{ATOM_NS}updated")
+        if upd_el is not None and upd_el.text:
+            updated_at_str = upd_el.text.strip()
+
+        # Comment field (often contains page count, conference info)
+        comment = ""
+        comment_el = entry.find(f"{ARXIV_NS}comment")
+        if comment_el is not None and comment_el.text:
+            comment = comment_el.text.strip()
+
+        # Journal reference
+        journal_ref = ""
+        jref_el = entry.find(f"{ARXIV_NS}journal_ref")
+        if jref_el is not None and jref_el.text:
+            journal_ref = jref_el.text.strip()
+
+        # DOI
+        doi = ""
+        doi_el = entry.find(f"{ARXIV_NS}doi")
+        if doi_el is not None and doi_el.text:
+            doi = doi_el.text.strip()
+
+        # All categories (primary + secondary)
+        all_categories = list(categories)
+        for cat_el in entry.findall(f"{ATOM_NS}category"):
+            term = cat_el.get("term", "")
+            if term and term not in all_categories:
+                all_categories.append(term)
 
         canonical_key = (
             f"arxiv:{arxiv_id}"
             if arxiv_id
             else f"hash:{hashlib.md5(title.encode()).hexdigest()[:16]}"
         )
+
+        # Derive venue from journal_ref or comment
+        venue = ""
+        if journal_ref:
+            venue = journal_ref
+        elif comment:
+            # Try to extract conference name from comment (e.g. "Accepted at NeurIPS 2024")
+            import re
+            conf_match = re.search(r'(?:accepted|published|appear)\s+(?:at|in|by)\s+(\w[\w\s&-]+)', comment, re.IGNORECASE)
+            if conf_match:
+                venue = conf_match.group(1).strip()
 
         return Paper(
             canonical_key=canonical_key,
@@ -235,5 +279,15 @@ class ArxivAdapter(SourceAdapter):
             published_at=published_at,
             url=url,
             topics=categories,
-            metadata={"arxiv_categories": categories},
+            doi=doi or None,
+            venue=venue,
+            pdf_url=pdf_url or None,
+            metadata={
+                "arxiv_categories": all_categories,
+                "comment": comment,
+                "journal_ref": journal_ref,
+                "doi": doi,
+                "pdf_url": pdf_url,
+                "updated_at": updated_at_str,
+            },
         )

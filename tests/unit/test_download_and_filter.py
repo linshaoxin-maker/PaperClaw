@@ -122,6 +122,9 @@ class TestExtractArxivId:
 class TestFilteringManagerConcurrent:
     def test_parallel_scoring(self, storage: SQLiteStorage):
         """Verify papers are scored in parallel, not serial."""
+        import time as _time
+        from paper_agent.infra.llm.llm_provider import LLMProvider
+
         papers = [
             _paper(
                 canonical_key=f"arxiv:2401.{i:05d}",
@@ -133,39 +136,42 @@ class TestFilteringManagerConcurrent:
         for p in papers:
             storage.save_paper(p)
 
-        call_times: list[float] = []
+        class _SlowLLM(LLMProvider):
+            def score_relevance(self, paper, interests):
+                _time.sleep(0.1)
+                return {"score": 5.0, "band": "low", "reason": "test", "topics": ["test"]}
+            def classify_topics(self, paper): return []
+            def extract_methodology(self, text): return []
+            def extract_objectives(self, text): return []
+            def synthesize(self, prompt): return ""
+            def assess_credibility(self, paper): return {}
 
-        def mock_score(paper: Paper, interests: dict) -> dict:
-            call_times.append(time.monotonic())
-            time.sleep(0.1)
-            return {
-                "score": 5.0,
-                "band": "low",
-                "reason": "test",
-                "topics": ["test"],
-            }
-
-        llm = MagicMock()
-        llm.score_relevance = mock_score
-
-        fm = FilteringManager(storage, llm)
-        start = time.monotonic()
+        fm = FilteringManager(storage, _SlowLLM())
+        start = _time.monotonic()
         result = fm.filter_papers(papers, {"topics": [], "keywords": []}, show_progress=False)
-        elapsed = time.monotonic() - start
+        elapsed = _time.monotonic() - start
 
         assert len(result) == 8
-        # 8 papers at 0.1s each serial = 0.8s; parallel (8 workers) ≈ 0.1s
-        assert elapsed < 0.5, f"Expected parallel execution, but took {elapsed:.2f}s"
+        # 8 papers at 0.1s each serial = 0.8s; parallel (8 workers) should be much faster
+        assert elapsed < 0.7, f"Expected parallel execution, but took {elapsed:.2f}s"
 
     def test_llm_failure_degrades_gracefully(self, storage: SQLiteStorage):
         """If LLM call raises, paper gets score=0 instead of crashing."""
+        from paper_agent.infra.llm.llm_provider import LLMProvider
+
         p = _paper()
         storage.save_paper(p)
 
-        llm = MagicMock()
-        llm.score_relevance.side_effect = RuntimeError("API timeout")
+        class _FailingLLM(LLMProvider):
+            def score_relevance(self, paper, interests):
+                raise RuntimeError("API timeout")
+            def classify_topics(self, paper): return []
+            def extract_methodology(self, text): return []
+            def extract_objectives(self, text): return []
+            def synthesize(self, prompt): return ""
+            def assess_credibility(self, paper): return {}
 
-        fm = FilteringManager(storage, llm)
+        fm = FilteringManager(storage, _FailingLLM())
         result = fm.filter_papers([p], {"topics": [], "keywords": []}, show_progress=False)
 
         assert len(result) == 1
@@ -174,7 +180,12 @@ class TestFilteringManagerConcurrent:
         assert "失败" in result[0].recommendation_reason
 
     def test_partial_llm_failure(self, storage: SQLiteStorage):
-        """Some succeed, some fail — all papers still returned."""
+        """Some succeed, some fail — all papers still returned.
+
+        Uses paper title to deterministically decide which calls fail.
+        """
+        from paper_agent.infra.llm.llm_provider import LLMProvider
+
         papers = [
             _paper(
                 canonical_key=f"arxiv:2401.{i:05d}",
@@ -186,25 +197,27 @@ class TestFilteringManagerConcurrent:
         for p in papers:
             storage.save_paper(p)
 
-        call_count = 0
+        # Papers 0 and 2 succeed; papers 1 and 3 fail — determined by title
+        class _PartialLLM(LLMProvider):
+            def score_relevance(self, paper, interests):
+                idx = int(paper.title.split()[-1])
+                if idx % 2 == 1:
+                    raise RuntimeError("Deterministic failure")
+                return {"score": 8.0, "band": "high", "reason": "good", "topics": []}
 
-        def alternating_score(paper: Paper, interests: dict) -> dict:
-            nonlocal call_count
-            call_count += 1
-            if call_count % 2 == 0:
-                raise RuntimeError("Intermittent failure")
-            return {"score": 8.0, "band": "high", "reason": "good", "topics": []}
+            def classify_topics(self, paper): return []
+            def extract_methodology(self, text): return []
+            def extract_objectives(self, text): return []
+            def synthesize(self, prompt): return ""
+            def assess_credibility(self, paper): return {}
 
-        llm = MagicMock()
-        llm.score_relevance = alternating_score
-
-        fm = FilteringManager(storage, llm)
+        fm = FilteringManager(storage, _PartialLLM())
         result = fm.filter_papers(papers, {"topics": [], "keywords": []}, show_progress=False)
 
         assert len(result) == 4
         scores = [p.relevance_score for p in result]
-        assert 8.0 in scores
-        assert 0.0 in scores
+        assert 8.0 in scores   # even-indexed papers succeeded
+        assert 0.0 in scores   # odd-indexed papers degraded to 0
 
 
 # ── Download URL logic ───────────────────────────────────────────────

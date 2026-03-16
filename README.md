@@ -249,26 +249,25 @@ paper-agent setup claude-code --scope global
 配置完成后在该目录运行 `claude`，可以使用：
 
 **主入口：**
-- `/paper` → **统一入口**，展示功能菜单，不知道用哪个命令时从这里开始
+- `/paper` → **统一入口**，智能路由到对应工作流
 
 **日常命令：**
-- `/start-my-day` → `paper_morning_brief`: 一次调用完成 context + collect + digest + auto-mark（表格化展示 + 结论与建议）
-- `/paper-search transformer` → 搜索论文库
-- `/paper-analyze 2301.12345` → 深度分析 + 自动存笔记 + 标记状态
+- `/start-my-day` → 一次调用完成 context + collect + digest + auto-mark（表格化展示 + 结论与建议 + 智能推荐下一步）
+- `/paper-search transformer` → 搜索论文库（结果含 abstract、venue、citation_count）
+- `/paper-analyze 2301.12345` → 深度分析 + 自动存笔记 + 标记状态 + 推荐后续操作
 - `/paper-collect 7` → 三源并行采集
 - `/paper-setup` → 对话式配置
 
 **多篇智能：**
-- `/paper-compare` → 多篇对比
-- `/paper-survey AI for EDA` → `paper_quick_scan` quick-first 文献综述
-- `/paper-download 2301.12345` → 下载 PDF
-- "帮我找 Attention Is All You Need" → `paper_find_and_download` 精确查找 + 下载
+- `/paper-compare` → 多篇对比（自动关联 PaperProfile 数据：novelty、datasets、baselines）
+- `/paper-survey AI for EDA` → quick-first 文献综述 + 自动保存 + 推荐导出 BibTeX
+- `/paper-download 2301.12345` → 下载 PDF（arXiv → S2 openAccessPdf → DOI fallback 链）
+- `/paper-triage` → 自动按 profile 三档分流 + credibility 信号 + 推荐批量下载
 
-**能力下沉工具（v03 新增）：**
-- `/paper-triage` → `paper_auto_triage`: 自动按 profile 三档分流
-- `/paper-insight GNN placement` → `paper_trend_data`: 趋势分析（按年×方向）
-- `paper_citation_trace` → 递归引用追踪（2 层，一次调用）
-- `paper_quick_scan` → 本地+在线搜索去重排序（替代 3 步 AI 链）
+**深度分析（v04/v05 增强）：**
+- `/paper-insight GNN placement` → 趋势分析（按年×方向）+ 推荐上升子方向
+- `/paper-citation 2301.12345` → 递归引用追踪（2 层）+ 关键节点识别
+- `/paper-plan` → 研究规划（ideation / experiment plan / reading pack 三模式）
 
 **Workspace：**
 - `.paper-agent/` 目录：阅读进度、笔记、分组 → markdown 文件
@@ -527,3 +526,42 @@ Agent: [调用 MCP tool: paper_search("LoRA fine-tuning hardware design")]
 | 分析论文 | show → 自己读 → 自己写笔记 | 说一句话 → AI 生成结构化笔记并保存 |
 | 上下文 | 手动在终端和 IDE 间切换 | AI 知道你在写什么代码，能关联推荐 |
 | 语言 | 英文命令 + 英文输出 | 自然语言输入，中文输出 |
+
+## v04/v05 新特性
+
+### 智能工作流引导（v05）
+
+每个工作流结束后，系统基于实际结果数据主动推荐下一步操作：
+
+```
+💡 下一步建议：
+1. 深入分析 [DREAMPlace v4]（9.2分，有代码可复现）
+2. 批量下载这 3 篇重要论文的 PDF
+（说编号或告诉我你想做什么）
+```
+
+推荐是 data-driven 的——引用实际论文标题、分数、数量，不是静态选项。
+
+### 信息密度提升（v04/v05）
+
+- 搜索/Digest/Triage 结果包含 abstract snippet、authors、venue、citation count、DOI、PDF 链接
+- BibTeX 导出自动区分 `@inproceedings` vs `@article`，生成 AuthorYear cite key
+- PaperProfile 提取新增 novelty_claim、problem_formulation、key_contributions
+- 论文对比自动关联 PaperProfile 数据（方法、数据集、baseline、最佳结果）
+
+### Feedback Loop（v04/v05）
+
+用户反馈（"这类少推"/"这篇很好"）会影响：
+- FilteringManager 评分偏移
+- SearchEngine 排序权重
+- DigestGenerator 推荐顺序
+
+### 可信度评估（v04）
+
+- Venue 分类：Top/Good/Workshop/Preprint，覆盖 ML + EDA 会议和期刊
+- 快速信号：venue tier + code availability + citation velocity（无需 LLM 调用）
+- 深度评估：LLM 分析方法论严谨性、实验充分性、可复现性
+
+### 59 个 MCP 工具
+
+完整工具列表见 `paper-agent doctor` 输出，涵盖：搜索、采集、分析、提取、对比、引用追踪、趋势分析、研究规划、工作区管理等。

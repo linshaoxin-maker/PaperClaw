@@ -37,7 +37,9 @@ plugin/
     │   ├── paper-download.md        ← /paper-download
     │   ├── paper-setup.md           ← /paper-setup
     │   ├── paper-triage.md          ← /paper-triage (auto-classify)
-    │   └── paper-insight.md         ← /paper-insight (trend analysis)
+    │   ├── paper-insight.md         ← /paper-insight (trend analysis)
+    │   ├── paper-citation.md        ← /paper-citation (citation chain exploration)
+    │   └── paper-plan.md            ← /paper-plan (research planning)
     └── skills/                      ← 工作流 Skills（AI 行为编排）
         ├── paper-intelligence/      ← 路由 Skill：根据意图分发到具体工作流
         │   └── SKILL.md

@@ -3,7 +3,10 @@ description: One-call morning pipeline — context recovery, collect, digest, au
 allowed-tools: [
   "mcp__paper-agent__paper_morning_brief",
   "mcp__paper-agent__paper_show",
+  "mcp__paper-agent__paper_watch_check",
+  "mcp__paper-agent__paper_watch_digest",
   "mcp__paper-agent__paper_save_report",
+  "mcp__paper-agent__paper_reading_status",
   "Read"
 ]
 ---

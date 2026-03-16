@@ -78,13 +78,27 @@
 | **Context Recovery** | AI 在新会话开始时读取 journal + reading-list 恢复上下文 | 跨会话记忆 |
 | **Workspace Sync** | Workspace 文件与数据库之间的双向同步操作 | 容错机制 |
 
+## v04-experience 术语
+
+| 术语 | 定义 | 上下文 |
+|------|------|--------|
+| **能力可达性 (Discoverability)** | 用户能否通过自然语言意图触达系统已有的工具能力 | v04 核心问题：70% 工具不可见 |
+| **Skill 层** | SKILL.md 文件定义的工作流，指导 AI IDE 在各 Phase 调用哪些 MCP 工具 | 位于交互层，是用户触达工具能力的桥梁 |
+| **条件分支** | Skill 中根据前置条件（如"论文是否已有 PDF"）决定调用不同工具链的逻辑 | v04 新增，v03 Skill 无此能力 |
+| **数据预填充** | 报告模板中的动态字段由工具返回的结构化数据填充，而非 AI 自由推断 | 提升报告质量一致性 |
+| **Batch Scoring** | 将逐篇 LLM 评分改为一次 prompt 评多篇，降低延迟和成本 | FilteringManager 优化 |
+| **Title 预过滤** | 在 LLM scoring 前用 profile keywords 快速排除明显不相关的论文 | 减少 LLM API 调用量 |
+| **Feedback 闭环** | 用户的偏好反馈（paper_feedback）反向影响推荐和评分权重 | v04 建立，v03 只记录不影响 |
+| **PaperProfile** | 从论文中提取的结构化元数据：task, method_family, datasets, baselines, metrics 等 | paper_extract 产出，paper_compare_table 消费 |
+
 ## 版本术语
 
 | 术语 | 定义 | 上下文 |
 |------|------|--------|
 | **v01** | 基础版本 + 多源扩展：CLI + MCP + arXiv/DBLP/S2 + 多篇智能 | 已实现 |
-| **v02** | Workspace Layer 版本：阅读管理 + 笔记 + 分组 + 引用链 + 跨会话记忆 | 设计中 |
-| **v03+** | 远期：Paper Q&A + 趋势分析 + Related Work 生成 + 团队协作 | 规划中 |
+| **v02** | Workspace Layer 版本：阅读管理 + 笔记 + 分组 + 引用链 + 跨会话记忆 | 已实现 |
+| **v03** | 能力下沉版本：多步 AI 链下沉为单步原子工具 (quick_scan, auto_triage, citation_trace, morning_brief, trend_data) | 已实现 |
+| **v04-experience** | 能力上浮 + 体验打磨：Skill 层升级、输出质量提升、性能优化、反馈闭环 | 当前版本 |
 
 ---
 

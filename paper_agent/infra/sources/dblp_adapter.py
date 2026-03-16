@@ -153,6 +153,11 @@ class DBLPAdapter(SourceAdapter):
 
         conf_short = venue_key.split("/")[-1].upper() if "/" in venue_key else venue_key.upper()
 
+        # Extract DOI from DBLP
+        doi = info.get("doi", "")
+        if isinstance(doi, list):
+            doi = doi[0] if doi else ""
+
         return Paper(
             canonical_key=canonical_key,
             source_name="dblp",
@@ -163,9 +168,12 @@ class DBLPAdapter(SourceAdapter):
             published_at=published_at,
             url=url,
             topics=[conf_short],
+            doi=doi or None,
+            venue=venue_name,
             metadata={
                 "dblp_key": dblp_key,
                 "venue": venue_name,
                 "venue_key": venue_key,
+                "doi": doi,
             },
         )
