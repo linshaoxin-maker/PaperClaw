@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "paper-agent": {
-      "command": "/Users/linshaoxin/Documents/AI4EDA/papers/paper_agent/.venv/bin/paper-agent-mcp",
-      "args": []
-    }
-  }
-}
