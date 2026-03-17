@@ -354,38 +354,49 @@ class WorkspaceManager:
             lines.append("")
         (vault_dir / "_按年份分布.md").write_text("\n".join(lines), encoding="utf-8")
 
-        # ── 按来源分类 ──
+        # ── 按会议/Venue 分类 ──
+        venues_db: list[str] = []
+        try:
+            venue_rows = self._storage.conn.execute(
+                "SELECT DISTINCT venue FROM papers "
+                "WHERE venue IS NOT NULL AND venue != '' AND venue != 'arXiv' "
+                "ORDER BY venue"
+            ).fetchall()
+            venues_db = [r[0] for r in venue_rows if r[0]]
+        except Exception:
+            pass
+
         lines = [
-            "# 🏛️ 按来源分类\n",
+            "# 🏛️ 按会议分类\n",
             "## 统计概览",
             "```dataview",
             'TABLE length(rows) as "论文数"',
             'FROM "02-论文库"',
-            'WHERE !startswith(file.name, "_")',
-            "GROUP BY source",
+            'WHERE !startswith(file.name, "_") AND venue AND venue != "arXiv"',
+            "GROUP BY venue",
             "SORT length(rows) DESC",
             "```",
             "",
         ]
-        if sources:
-            for src in sources:
-                lines.append(f"## {src}")
+        if venues_db:
+            for v in venues_db:
+                lines.append(f"## {v}")
                 lines.append("```dataview")
                 lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
                 lines.append('FROM "02-论文库"')
-                lines.append(f'WHERE !startswith(file.name, "_") AND source = "{src}"')
+                lines.append(f'WHERE !startswith(file.name, "_") AND venue = "{v}"')
                 lines.append("SORT date DESC")
                 lines.append("```")
                 lines.append("")
-        else:
-            lines.append("## 论文列表")
-            lines.append("```dataview")
-            lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
-            lines.append('FROM "02-论文库"')
-            lines.append('WHERE !startswith(file.name, "_")')
-            lines.append("SORT date DESC")
-            lines.append("```")
-            lines.append("")
+        # Always add arXiv preprints section
+        lines.append("## 📄 arXiv 预印本（未发表）")
+        lines.append("```dataview")
+        lines.append('TABLE first_author as "一作", date as "日期", score as "分数"')
+        lines.append('FROM "02-论文库"')
+        lines.append('WHERE !startswith(file.name, "_") AND (!venue OR venue = "arXiv")')
+        lines.append("SORT date DESC")
+        lines.append("```")
+        lines.append("")
         (vault_dir / "_按会议分类.md").write_text("\n".join(lines), encoding="utf-8")
 
         # ── 按分组分类 ──

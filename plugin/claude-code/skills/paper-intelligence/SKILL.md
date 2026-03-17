@@ -20,6 +20,7 @@ Call `paper_workspace_context()` first. Read the `mode` field:
 | "start my day" / "今天看什么" / "morning" | `paper_morning_brief` tool directly |
 | Gives a paper title / arXiv ID | `paper_show` or `paper_find_and_download` |
 | "这篇论文讲了什么" / "analyze this" | deep-dive skill |
+| "对比" / "compare" / "哪个更好" / "这几篇有什么区别" | paper-compare skill |
 | "这个方向有什么工作" / "survey" / "综述" | literature-survey skill |
 | "引用链" / "谁引了这篇" / "citation" | citation-explore skill |
 | "筛一下" / "triage" / "哪些值得看" | paper-triage skill |
